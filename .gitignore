@@ -1,0 +1,8 @@
+node_modules/
+tmp/
+backend/node_modules/
+backend/db/*.db
+backend/db/*.db-*
+.env
+backend/.env
+frontend/dist/

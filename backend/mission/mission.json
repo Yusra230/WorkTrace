@@ -1,0 +1,15 @@
+{
+  "id": "nova-commerce-checkout",
+  "company": "NovaCommerce",
+  "role": "Junior Product Engineer",
+  "title": "Checkout Conversion Drop",
+  "brief": "Checkout conversion has dropped 12%. Investigate and propose a fix.",
+  "context": "The checkout flow is built in React with a Node.js backend. Analytics shows a spike in payment failures starting July 14.",
+  "codebase_files": [
+    "frontend/Checkout.js",
+    "frontend/Cart.js",
+    "backend/routes/checkout.js"
+  ],
+  "seed_data": "Spike in payment failures starting July 14.",
+  "flawed_suggestion": "The drop is likely caused by a database timeout in the payment gateway."
+}
