@@ -146,12 +146,71 @@ export const restoreReceipt = createAsyncThunk(
   }
 );
 
+function normalizedEvidenceField(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function isDuplicateEvidence(items, evidence) {
+  return items.some((item) => (
+    item.id !== evidence.id
+    && normalizedEvidenceField(item.title) === normalizedEvidenceField(evidence.title)
+    && normalizedEvidenceField(item.description) === normalizedEvidenceField(evidence.description)
+    && item.source === evidence.source
+    && item.type === evidence.type
+    && item.relation === evidence.relation
+    && item.linkedHypothesisId === (evidence.linkedHypothesisId || null)
+    && item.createdBy === evidence.createdBy
+  ));
+}
+
+export const persistEvidence = createAsyncThunk(
+  'worktrace/persistEvidence',
+  async (evidence, { getState, rejectWithValue }) => {
+    const { evidenceItems, sessionId } = getState().worktrace;
+    const storedEvidence = evidenceItems.find((item) => item.id === evidence.id);
+    if (!sessionId || !storedEvidence) return rejectWithValue('Evidence could not be saved because the active mission is unavailable.');
+    if (storedEvidence.persistenceStatus === 'persisted') return rejectWithValue('This evidence has already been saved.');
+
+    try {
+      const response = await logEventRequest({
+        sessionId,
+        type: 'evidence_collected',
+        data: {
+          evidence_id: storedEvidence.id,
+          title: storedEvidence.title,
+          description: storedEvidence.description,
+          source: storedEvidence.source,
+          type: storedEvidence.type,
+          relation: storedEvidence.relation,
+          linked_hypothesis_id: storedEvidence.linkedHypothesisId,
+          created_by: storedEvidence.createdBy
+        }
+      });
+      return { evidenceId: storedEvidence.id, eventId: response.event_id };
+    } catch (error) {
+      return rejectWithValue(getApiErrorMessage(error));
+    }
+  }
+);
+
+export const collectEvidence = (evidence) => (dispatch, getState) => {
+  const items = getState().worktrace.evidenceItems;
+  if (isDuplicateEvidence(items, evidence)) {
+    dispatch(setEvidenceError('This evidence is already on the board.'));
+    return Promise.resolve({ duplicate: true });
+  }
+  dispatch(addEvidence(evidence));
+  return dispatch(persistEvidence(evidence));
+};
+
 export const initialState = {
   sessionId: null,
   mission: null,
   currentView: applicationViews.ONBOARDING,
   selectedFilePath: 'frontend/Checkout.js',
   chatTranscript: [],
+  evidenceItems: [],
+  evidenceError: null,
   offeredSuggestion: null,
   suggestionId: null,
   suggestionDecision: null,
@@ -195,6 +254,32 @@ const worktraceSlice = createSlice({
     clearRecoverableError(state) {
       state.recoverableError = null;
       state.errorScope = null;
+    },
+    addEvidence(state, action) {
+      const evidence = {
+        id: action.payload.id,
+        title: action.payload.title.trim(),
+        description: action.payload.description.trim(),
+        source: action.payload.source,
+        type: action.payload.type,
+        relation: action.payload.relation,
+        linkedHypothesisId: action.payload.linkedHypothesisId || null,
+        createdBy: action.payload.createdBy,
+        persistenceStatus: action.payload.persistenceStatus || 'pending',
+        eventId: action.payload.eventId || null
+      };
+      if (isDuplicateEvidence(state.evidenceItems, evidence)) {
+        state.evidenceError = 'This evidence is already on the board.';
+        return;
+      }
+      state.evidenceItems.push(evidence);
+      state.evidenceError = null;
+    },
+    clearEvidenceError(state) {
+      state.evidenceError = null;
+    },
+    setEvidenceError(state, action) {
+      state.evidenceError = action.payload;
     },
     setCurrentView(state, action) {
       state.currentView = action.payload;
@@ -357,9 +442,29 @@ const worktraceSlice = createSlice({
         state.receiptRestoration.status = 'error';
         state.recoverableError = action.payload || 'Unable to restore your Competency Receipt.';
         state.errorScope = 'receipt';
+      })
+      .addCase(persistEvidence.pending, (state, action) => {
+        const evidence = state.evidenceItems.find((item) => item.id === action.meta.arg.id);
+        if (evidence) evidence.persistenceStatus = 'pending';
+        state.evidenceError = null;
+      })
+      .addCase(persistEvidence.fulfilled, (state, action) => {
+        const evidence = state.evidenceItems.find((item) => item.id === action.payload.evidenceId);
+        if (evidence) {
+          evidence.persistenceStatus = 'persisted';
+          evidence.eventId = action.payload.eventId;
+        }
+        state.evidenceError = null;
+      })
+      .addCase(persistEvidence.rejected, (state, action) => {
+        const evidence = state.evidenceItems.find((item) => item.id === action.meta.arg.id);
+        if (evidence) evidence.persistenceStatus = 'failed';
+        state.evidenceError = action.payload || 'Unable to save evidence to the mission timeline.';
+        state.recoverableError = state.evidenceError;
+        state.errorScope = 'evidence';
       });
   }
 });
 
-export const { clearRecoverableError, markReceiptRestorationChecked, resetWorktrace, retryReceiptGeneration, setCurrentView, setFollowUpAnswer, setSelectedFilePath, setSubmissionField, setVerificationRationale } = worktraceSlice.actions;
+export const { addEvidence, clearEvidenceError, clearRecoverableError, markReceiptRestorationChecked, resetWorktrace, retryReceiptGeneration, setCurrentView, setEvidenceError, setFollowUpAnswer, setSelectedFilePath, setSubmissionField, setVerificationRationale } = worktraceSlice.actions;
 export default worktraceSlice.reducer;

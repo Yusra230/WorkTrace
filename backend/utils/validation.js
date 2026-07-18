@@ -8,14 +8,19 @@ const MAX = {
   justification: 10000,
   followUp: 10000,
   rationale: 2000,
-  decision: 100
+  decision: 100,
+  evidenceTitle: 120,
+  evidenceDescription: 1000,
+  evidenceSource: 120,
+  evidenceType: 100
 };
 
 const allowedEventTypes = new Set([
   'suggestion_accepted',
   'suggestion_rejected',
   'suggestion_verified',
-  'user_decision'
+  'user_decision',
+  'evidence_collected'
 ]);
 
 function requireObject(value, label = 'Request body') {
@@ -97,16 +102,50 @@ function validateEvent(body) {
     if (data.reason !== undefined) safeData.reason = requireString(data.reason, 'data.reason', MAX.rationale);
     return { sessionId, type, data: safeData };
   }
+
+  if (type === 'evidence_collected') {
+    if (typeof data.evidence_id !== 'string' || !isUuid(data.evidence_id)) {
+      throw new AppError(400, 'data.evidence_id must be a valid UUID.', 'validation_error');
+    }
+    if (!['supports', 'contradicts', 'neutral'].includes(data.relation)) {
+      throw new AppError(400, 'data.relation must be supports, contradicts, or neutral.', 'validation_error');
+    }
+    if (!['learner', 'ai_teammate', 'system'].includes(data.created_by)) {
+      throw new AppError(400, 'data.created_by must be learner, ai_teammate, or system.', 'validation_error');
+    }
+    let linkedHypothesisId = null;
+    if (data.linked_hypothesis_id !== null && data.linked_hypothesis_id !== undefined) {
+      linkedHypothesisId = requireSessionId(data.linked_hypothesis_id);
+    }
+    return {
+      sessionId,
+      type,
+      data: {
+        evidence_id: data.evidence_id,
+        title: requireString(data.title, 'data.title', MAX.evidenceTitle),
+        description: requireString(data.description, 'data.description', MAX.evidenceDescription),
+        source: requireString(data.source, 'data.source', MAX.evidenceSource),
+        type: requireString(data.type, 'data.type', MAX.evidenceType),
+        relation: data.relation,
+        linked_hypothesis_id: linkedHypothesisId,
+        created_by: data.created_by
+      }
+    };
+  }
 }
 
 function isCauseQuestion(message) {
-  const normalized = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  const normalized = message.toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim();
   const patterns = [
-    /^(what|can you tell me what|do you know what) (is |was )?(causing|caused) (this|the drop|the issue|the problem|the drop|drop|issue|problem)\??$/,
-    /^what (is )?the root cause\??$/,
+    /^(?:what|can you tell me what|do you know what) (?:is |was )?(?:causing|caused) (?:this|the drop|the issue|the problem|drop|issue|problem)\??$/,
+    /^what(?:'s| is)? (?:the )?(?:issue|problem|root cause)\??$/,
+    /^what(?:'s| is) causing (?:this|the drop|the issue|the problem|checkout)\??$/,
+    /^why (?:is|are) (?:the )?(?:checkout|checkout flow|payment|payments) failing\??$/,
+    /^what do you think (?:is|went) wrong\??$/,
+    /^can (?:we|you) (?:help (?:me )?)?(?:identify|find) (?:the )?(?:cause|root cause|issue|problem)\??$/,
     /^what should i fix\??$/,
-    /^can you help me (find|identify) the (issue|problem|cause)\??$/,
-    /^can you help me find what('?s| is) causing (this|the drop|the issue|the problem)\??$/
+    /^can you help (?:me )?(?:find|identify) (?:the )?(?:issue|problem|cause|root cause)\??$/,
+    /^can you help me find what(?:'s| is) causing (?:this|the drop|the issue|the problem)\??$/
   ];
   return patterns.some((pattern) => pattern.test(normalized));
 }

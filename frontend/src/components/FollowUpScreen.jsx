@@ -1,10 +1,11 @@
 import { ArrowRight, MessageSquareQuote } from 'lucide-react';
 import { useState } from 'react';
+import DecisionContextBanner from './DecisionContextBanner';
 import FormError from './FormError';
 
 const MAX_LENGTH = 10000;
 
-export default function FollowUpScreen({ answer, error, isSubmitting, onAnswerChange, onClearError, onSubmit, question }) {
+export default function FollowUpScreen({ answer, decisionContext, error, isSubmitting, onAnswerChange, onClearError, onSubmit, question }) {
   const [validationError, setValidationError] = useState(null);
 
   function submit(event) {
@@ -23,6 +24,7 @@ export default function FollowUpScreen({ answer, error, isSubmitting, onAnswerCh
         <span className="grid size-11 place-items-center rounded-xl bg-violet-300/15 text-violet-200"><MessageSquareQuote aria-hidden="true" size={22} /></span>
         <p className="mt-5 text-sm font-semibold uppercase tracking-[0.15em] text-violet-300">Independent explanation</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">Explain your judgment in your own words</h1>
+        <DecisionContextBanner {...decisionContext} />
         <div className="mt-6 rounded-xl border border-violet-300/20 bg-violet-300/10 p-5">
           <p className="text-xs font-semibold uppercase tracking-wider text-violet-200">Follow-up question</p>
           <p className="mt-2 text-base leading-7 text-violet-50">{question}</p>

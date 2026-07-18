@@ -1,7 +1,7 @@
 const express = require('express');
 const { AppError, asyncHandler } = require('../utils/errors');
 const { requireSessionId } = require('../utils/validation');
-const { getPublicTimeline, toPublicTimelineEvent } = require('../utils/timeline');
+const { getEvaluationTimeline, getPublicTimeline, toPublicTimelineEvent } = require('../utils/timeline');
 const { redactSensitiveText } = require('../utils/safety');
 
 const DIMENSIONS = ['technical_execution', 'problem_framing', 'ai_verification', 'independent_judgment', 'communication'];
@@ -92,7 +92,7 @@ function createReceiptRouter({ db, mission, ai, sessionLock }) {
       }
 
       db.appendEvent(sessionId, 'evaluation_started', {});
-      const timelineForEvaluation = getPublicTimeline(db, sessionId);
+      const timelineForEvaluation = getEvaluationTimeline(db, sessionId);
       const evaluationInput = {
         mission: {
           id: mission.id,

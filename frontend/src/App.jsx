@@ -12,7 +12,12 @@ import { getCompletedSessionId } from './services/receiptStorage';
 
 export default function App() {
   const dispatch = useDispatch();
-  const { competencyReceipt, currentView, errorScope, evaluation, followUp, loading, receiptRestoration, recoverableError, submission } = useSelector((state) => state.worktrace);
+  const { competencyReceipt, currentView, errorScope, evaluation, evidenceItems, followUp, loading, mission, receiptRestoration, recoverableError, submission, suggestionDecision, verification } = useSelector((state) => state.worktrace);
+  const decisionContext = {
+    evidenceCount: evidenceItems.filter((item) => item.persistenceStatus === 'persisted').length,
+    suggestionDecision,
+    verificationStatus: verification.status
+  };
 
   useEffect(() => {
     if (receiptRestoration.status !== 'idle') return;
@@ -37,13 +42,13 @@ export default function App() {
         <WorkspaceScreen />
       )}
       {currentView === applicationViews.SUBMISSION && (
-        <SubmissionScreen error={errorScope === 'submission' ? recoverableError : null} isSubmitting={loading.submitSolution} onClearError={() => dispatch(clearRecoverableError())} onFieldChange={(field, value) => dispatch(setSubmissionField({ field, value }))} onSubmit={() => dispatch(submitSolution())} submission={submission} />
+        <SubmissionScreen decisionContext={decisionContext} error={errorScope === 'submission' ? recoverableError : null} isSubmitting={loading.submitSolution} onClearError={() => dispatch(clearRecoverableError())} onFieldChange={(field, value) => dispatch(setSubmissionField({ field, value }))} onSubmit={() => dispatch(submitSolution())} submission={submission} />
       )}
       {currentView === applicationViews.FOLLOW_UP && (
-        <FollowUpScreen answer={followUp.answer} error={errorScope === 'follow-up' ? recoverableError : null} isSubmitting={loading.submitFollowUp} onAnswerChange={(answer) => dispatch(setFollowUpAnswer(answer))} onClearError={() => dispatch(clearRecoverableError())} onSubmit={() => dispatch(submitFollowUp())} question={followUp.question} />
+        <FollowUpScreen answer={followUp.answer} decisionContext={decisionContext} error={errorScope === 'follow-up' ? recoverableError : null} isSubmitting={loading.submitFollowUp} onAnswerChange={(answer) => dispatch(setFollowUpAnswer(answer))} onClearError={() => dispatch(clearRecoverableError())} onSubmit={() => dispatch(submitFollowUp())} question={followUp.question} />
       )}
       {currentView === applicationViews.EVALUATING && <EvaluationScreen error={errorScope === 'receipt' ? recoverableError : null} onGenerate={() => dispatch(generateReceipt())} onRetry={() => dispatch(retryReceiptGeneration())} status={evaluation.status} />}
-      {currentView === applicationViews.RECEIPT && <ReceiptScreen receipt={competencyReceipt} />}
+      {currentView === applicationViews.RECEIPT && <ReceiptScreen mission={mission} receipt={competencyReceipt} />}
     </AppShell>
   );
 }

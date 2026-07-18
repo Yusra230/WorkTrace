@@ -12,6 +12,9 @@ function createEventRouter({ db, sessionLock }) {
       if (type.startsWith('suggestion_') && !db.findSuggestion(sessionId, data.suggestion_id)) {
         throw new AppError(400, 'suggestion_id does not belong to this session.', 'invalid_suggestion');
       }
+      if (type === 'evidence_collected' && data.linked_hypothesis_id && !db.findSuggestion(sessionId, data.linked_hypothesis_id)) {
+        throw new AppError(400, 'linked_hypothesis_id does not belong to this session.', 'invalid_suggestion');
+      }
       const event = db.appendEvent(sessionId, type, data);
       if (type === 'suggestion_verified') db.updateSession(sessionId, { verification_completed: 1 });
       return event;

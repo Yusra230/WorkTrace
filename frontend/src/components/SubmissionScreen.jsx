@@ -1,10 +1,11 @@
 import { ArrowRight, FileCheck2, Lightbulb } from 'lucide-react';
 import { useState } from 'react';
+import DecisionContextBanner from './DecisionContextBanner';
 import FormError from './FormError';
 
 const MAX_LENGTH = 10000;
 
-export default function SubmissionScreen({ error, isSubmitting, onClearError, onFieldChange, onSubmit, submission }) {
+export default function SubmissionScreen({ decisionContext, error, isSubmitting, onClearError, onFieldChange, onSubmit, submission }) {
   const [validationError, setValidationError] = useState(null);
 
   function submit(event) {
@@ -24,8 +25,9 @@ export default function SubmissionScreen({ error, isSubmitting, onClearError, on
         <p className="mt-5 text-sm font-semibold uppercase tracking-[0.15em] text-cyan-300">Final proposal</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">Document your recommended fix</h1>
         <p className="mt-3 leading-7 text-slate-300">State the solution you would propose to NovaCommerce, then explain the mission evidence that supports it.</p>
+        <DecisionContextBanner {...decisionContext} />
 
-        <form className="mt-8 space-y-6" onSubmit={submit} noValidate>
+        <form className="space-y-6" onSubmit={submit} noValidate>
           <div>
             <label htmlFor="solution" className="text-sm font-semibold text-slate-100">Proposed solution</label>
             <textarea id="solution" value={submission.solution} onChange={(event) => onFieldChange('solution', event.target.value)} maxLength={MAX_LENGTH} disabled={isSubmitting} rows="7" placeholder="Describe the fix or investigation outcome you recommend…" className="mt-2 w-full resize-y rounded-xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-sm leading-6 text-slate-100 placeholder:text-slate-600 focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/30 disabled:cursor-not-allowed disabled:opacity-60" />
