@@ -5,6 +5,8 @@ const { AppError } = require('./errors');
 const { retryAI } = require('./retry');
 const { redactSensitiveText } = require('./safety');
 
+const EVALUATOR_TEMPERATURE = 0;
+
 const receiptSchema = {
   type: 'object',
   additionalProperties: false,
@@ -72,6 +74,9 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
   const generateContent = (request) => retryAI(() => getClient().models.generateContent(request));
 
   return {
+    getEvaluationMetadata() {
+      return { model, temperature: EVALUATOR_TEMPERATURE };
+    },
     async teammate(history, message) {
       const transcript = history.map((item) => `${item.role}: ${item.content}`).join('\n');
       const response = await generateContent({
@@ -92,6 +97,7 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
         contents: JSON.stringify(evidence),
         config: {
           systemInstruction: `${evaluatorPrompt}${correctionInstruction}`,
+          temperature: EVALUATOR_TEMPERATURE,
           responseMimeType: 'application/json',
           responseJsonSchema: receiptSchema
         }
@@ -101,4 +107,4 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
   };
 }
 
-module.exports = { createAiService, receiptSchema, safeParseJson };
+module.exports = { createAiService, receiptSchema, safeParseJson, EVALUATOR_TEMPERATURE };
