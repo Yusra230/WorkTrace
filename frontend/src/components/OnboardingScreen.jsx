@@ -1,40 +1,45 @@
-import { ArrowRight, BriefcaseBusiness, MessageSquareText } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 
-export default function OnboardingScreen({ error, isStarting, onStart }) {
+export default function OnboardingScreen({ error, isStarting, isVisible = true, onStart }) {
   return (
-    <section className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
-      <div>
-        <p className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-cyan-300">NovaCommerce simulation</p>
-        <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-          Show how you work with AI.
-        </h1>
-        <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-300">
+    <section id="main-content" className={`worktrace-onboarding ${isVisible ? 'worktrace-onboarding--revealed' : ''}`} aria-labelledby="onboarding-title">
+      <div className="worktrace-onboarding__hero">
+        <p className="worktrace-onboarding__eyebrow">NovaCommerce / live simulation</p>
+        <h1 id="onboarding-title">Show how you work with AI.</h1>
+        <p className="worktrace-onboarding__introduction">
           Investigate a real product incident alongside an AI teammate. Your reasoning, verification, and final judgment become the evidence.
         </p>
-        <button
-          type="button"
-          onClick={onStart}
-          disabled={isStarting}
-          className="mt-8 inline-flex items-center gap-2 rounded-lg bg-cyan-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isStarting ? 'Starting mission…' : 'Start investigation'}
-          {!isStarting && <ArrowRight aria-hidden="true" size={18} />}
-        </button>
-        {error && <p role="alert" className="mt-4 max-w-xl rounded-lg border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">{error}</p>}
+        <p className="worktrace-onboarding__narrative">
+          I am about to enter a real investigation where my reasoning becomes evidence.
+        </p>
+        <div className="worktrace-onboarding__actions">
+          <button type="button" onClick={onStart} disabled={isStarting} className="worktrace-onboarding__start">
+            {isStarting ? 'Starting mission…' : 'Start investigation'}
+            {!isStarting && <ArrowUpRight aria-hidden="true" size={18} strokeWidth={2.25} />}
+          </button>
+          <p className="worktrace-onboarding__action-note">Your investigation opens in a focused workspace.</p>
+        </div>
+        {error && <p role="alert" className="worktrace-onboarding__error">{error}</p>}
       </div>
 
-      <aside className="rounded-2xl border border-slate-700 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/30">
-        <p className="text-sm font-medium text-slate-400">Your assignment</p>
-        <div className="mt-5 space-y-5">
-          <div className="flex gap-3">
-            <BriefcaseBusiness aria-hidden="true" className="mt-0.5 text-violet-300" size={20} />
-            <div><p className="font-medium text-white">Junior Product Engineer</p><p className="mt-1 text-sm text-slate-400">NovaCommerce</p></div>
-          </div>
-          <div className="flex gap-3">
-            <MessageSquareText aria-hidden="true" className="mt-0.5 text-cyan-300" size={20} />
-            <div><p className="font-medium text-white">Checkout conversion dropped 12%</p><p className="mt-1 text-sm leading-6 text-slate-400">Investigate the failure spike and propose a well-supported fix.</p></div>
-          </div>
+      <aside className="worktrace-mission-brief" aria-labelledby="mission-brief-title">
+        <div className="worktrace-mission-brief__heading">
+          <p>Assignment brief</p>
+          <span aria-hidden="true">↗</span>
         </div>
+        <div className="worktrace-mission-brief__company">
+          <span className="worktrace-mission-brief__company-mark" aria-hidden="true" />
+          <p>NovaCommerce</p>
+        </div>
+        <div className="worktrace-mission-brief__content">
+          <p className="worktrace-mission-brief__label">Your role</p>
+          <h2 id="mission-brief-title">Junior Product Engineer</h2>
+          <div className="worktrace-mission-brief__rule" />
+          <p className="worktrace-mission-brief__label">Incident</p>
+          <p className="worktrace-mission-brief__incident">Checkout conversion dropped 12%</p>
+          <p className="worktrace-mission-brief__description">Investigate the failure spike and propose a well-supported fix.</p>
+        </div>
+        <p className="worktrace-mission-brief__footer">Reasoning record</p>
       </aside>
     </section>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import reducer, { addEvidence, applicationViews, collectEvidence, generateReceipt, initialState, persistEvidence, recordSuggestionDecision, restoreReceipt, sendChat, startSession, submitFollowUp, submitSolution, verifySuggestionDecision } from './worktraceSlice';
+import reducer, { addEvidence, applicationViews, collectEvidence, generateReceipt, hydrateActiveSession, initialState, persistEvidence, recordSuggestionDecision, restoreReceipt, sendChat, startSession, submitFollowUp, submitSolution, verifySuggestionDecision } from './worktraceSlice';
 
 describe('worktraceSlice', () => {
   it('stores the session and enters the workspace after session start succeeds', () => {
@@ -10,6 +10,29 @@ describe('worktraceSlice', () => {
     expect(nextState.mission).toEqual(mission);
     expect(nextState.currentView).toBe(applicationViews.WORKSPACE);
     expect(nextState.loading.startSession).toBe(false);
+  });
+
+  it('hydrates a restorable active session without restoring transient state', () => {
+    const restoredState = reducer(initialState, hydrateActiveSession({
+      sessionId: 'session-123',
+      mission: { id: 'nova-commerce-checkout' },
+      currentView: applicationViews.WORKSPACE,
+      selectedFilePath: 'frontend/Checkout.js',
+      chatTranscript: [{ id: 'learner-1', role: 'learner', content: 'Inspect the payment request.' }],
+      evidenceItems: [],
+      offeredSuggestion: null,
+      suggestionId: null,
+      suggestionDecision: null,
+      verification: { status: 'idle', rationale: '' },
+      submission: { solution: '', justification: '' },
+      followUp: { question: '', answer: '' },
+      evaluation: { status: 'idle', attempts: 0 }
+    }));
+
+    expect(restoredState.currentView).toBe(applicationViews.WORKSPACE);
+    expect(restoredState.chatTranscript).toHaveLength(1);
+    expect(restoredState.loading.startSession).toBe(false);
+    expect(restoredState.recoverableError).toBeNull();
   });
 
   it('retains a recoverable error when mission start fails', () => {

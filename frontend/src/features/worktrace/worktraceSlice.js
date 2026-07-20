@@ -255,6 +255,27 @@ const worktraceSlice = createSlice({
       state.recoverableError = null;
       state.errorScope = null;
     },
+    hydrateActiveSession(state, action) {
+      const snapshot = action.payload;
+      state.sessionId = snapshot.sessionId;
+      state.mission = snapshot.mission;
+      state.currentView = snapshot.currentView;
+      state.selectedFilePath = snapshot.selectedFilePath || initialState.selectedFilePath;
+      state.chatTranscript = snapshot.chatTranscript || [];
+      state.evidenceItems = snapshot.evidenceItems || [];
+      state.offeredSuggestion = snapshot.offeredSuggestion || null;
+      state.suggestionId = snapshot.suggestionId || null;
+      state.suggestionDecision = snapshot.suggestionDecision || null;
+      state.verification = snapshot.verification || initialState.verification;
+      state.submission = snapshot.submission || initialState.submission;
+      state.followUp = snapshot.followUp || initialState.followUp;
+      state.evaluation = snapshot.evaluation || initialState.evaluation;
+      state.competencyReceipt = null;
+      state.receiptRestoration.status = 'not-found';
+      state.loading = { ...initialState.loading };
+      state.recoverableError = null;
+      state.errorScope = null;
+    },
     addEvidence(state, action) {
       const evidence = {
         id: action.payload.id,
@@ -466,5 +487,5 @@ const worktraceSlice = createSlice({
   }
 });
 
-export const { addEvidence, clearEvidenceError, clearRecoverableError, markReceiptRestorationChecked, resetWorktrace, retryReceiptGeneration, setCurrentView, setEvidenceError, setFollowUpAnswer, setSelectedFilePath, setSubmissionField, setVerificationRationale } = worktraceSlice.actions;
+export const { addEvidence, clearEvidenceError, clearRecoverableError, hydrateActiveSession, markReceiptRestorationChecked, resetWorktrace, retryReceiptGeneration, setCurrentView, setEvidenceError, setFollowUpAnswer, setSelectedFilePath, setSubmissionField, setVerificationRationale } = worktraceSlice.actions;
 export default worktraceSlice.reducer;

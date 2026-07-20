@@ -1,6 +1,24 @@
 import { Activity, ShieldCheck } from 'lucide-react';
 
-export default function AppShell({ children }) {
+export default function AppShell({ children, variant = 'default' }) {
+  if (variant === 'onboarding') {
+    return (
+      <main className="worktrace-onboarding-shell">
+        <div className="worktrace-onboarding-shell__frame">
+          <header className="worktrace-onboarding-header">
+            <a className="worktrace-onboarding-header__brand" href="#main-content" aria-label="WorkTrace home">
+              <span className="worktrace-onboarding-header__mark" aria-hidden="true" />
+              <span>WorkTrace</span>
+            </a>
+            <p className="worktrace-onboarding-header__descriptor">Competency evidence for AI-native work</p>
+            <span className="worktrace-onboarding-header__mode">Investigation brief</span>
+          </header>
+          {children}
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#09111f] px-4 py-6 text-slate-100 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-6xl">
