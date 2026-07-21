@@ -1,8 +1,25 @@
 # WorkTrace
 
-**AI changed how people create work. WorkTrace changes how we evaluate it.**
+> **AI changed how people create work. WorkTrace changes how we evaluate it.**
 
-WorkTrace captures competency evidence for AI-native work. It records how a person investigates a problem, works with AI, checks suggestions, makes decisions, and explains their reasoning.
+**Built during OpenAI Build Week 2026.**  
+**Developed by Yusra Tariq (Solo Builder).**
+
+WorkTrace evaluates the investigation process rather than only the final answer. It captures competency evidence for AI-native work: how a person investigates a problem, works with AI, checks suggestions, makes decisions, and explains their reasoning.
+
+## 30-Second TL;DR
+
+| Traditional assessment | WorkTrace |
+| --- | --- |
+| Grades final answers | Evaluates the investigation process |
+| Ignores or bans AI | Captures and verifies AI interaction |
+| Produces one score | Produces an evidence-grounded Competency Receipt |
+
+## What Makes WorkTrace Different?
+
+AI tools can generate answers. WorkTrace looks for the human work around them: careful investigation, critical evaluation of AI input, independent decisions, evidence collection, and reasoning.
+
+**WorkTrace evaluates the process—not just the result.**
 
 ## The Problem
 
@@ -22,9 +39,9 @@ The core insight: work that is usually invisible can become evidence a reviewer 
 
 ## Why Now?
 
-AI-native work is becoming normal in software engineering, education, and hiring. People increasingly use AI to research, write, debug, and decide. Organizations still need a fair way to understand how that work happened.
+AI-native work is becoming normal. Technical hiring, enterprise AI upskilling, and AI-native education all need better evidence of how people work with AI, not only what they produce.
 
-The question is no longer only, “What did this person produce?” It is also, “How did they work with AI, evidence, and judgment to produce it?” WorkTrace is built for that gap.
+WorkTrace fits where human judgment still matters: when someone must investigate carefully, test an AI suggestion, and explain a decision.
 
 ## How It Works
 
@@ -47,11 +64,11 @@ The learner can inspect the mission's supplied files, ask the AI teammate ground
 
 ## The Five Competency Dimensions
 
-- **Problem Framing** — how the learner investigates the problem and selects relevant evidence.
-- **AI Verification** — how the learner accepts or rejects an AI suggestion and verifies that decision.
-- **Independent Judgment** — how the learner explains their own decision after the investigation.
-- **Technical Execution** — how the learner proposes a final solution.
-- **Communication** — how clearly the learner communicates the solution and independent explanation.
+- **Problem Framing**: how the learner investigates the problem and selects relevant evidence.
+- **AI Verification**: how the learner accepts or rejects an AI suggestion and verifies that decision.
+- **Independent Judgment**: how the learner explains their own decision after the investigation.
+- **Technical Execution**: how the learner proposes a final solution.
+- **Communication**: how clearly the learner communicates the solution and independent explanation.
 
 ## The Competency Receipt
 
@@ -65,33 +82,21 @@ The core trust principle is simple:
 
 AI suggestions and chat responses do not count as learner competency evidence. The evaluator must ground its mappings in recorded learner actions, such as selected evidence, decisions, verification, the final solution, and the independent explanation. The public receipt returns a backend-sanitized timeline.
 
-## Why WorkTrace Is Different
-
-### Normal AI Chatbots
-
-They help people produce answers. They usually do not show how a person reasoned with the AI or whether they checked its suggestion.
-
-### Final-Answer-Only Assessments
-
-They evaluate the output. They can miss the investigation, evidence selection, verification, and decision-making behind it.
-
-WorkTrace evaluates the process behind the answer, not only the answer itself.
-
 ## Product Flow
 
 The current application has five major screens:
 
-- **Home** — the public entry page. Its investigation actions open the internal flow at `#/investigate`.
-- **MissionEntry** — loads the real public mission preview before a session is created. The learner acknowledges the mission and starts one investigation session.
-- **InvestigationWorkSpace** — the full internal workspace for code review, AI chat, suggestions, decisions, verification, evidence, final submission, and follow-up explanation.
-- **EvaluationTransition** — shows real evaluation status. It requests receipt generation once the follow-up answer is successfully persisted and supports retry after an evaluator failure.
-- **CompetencyReceipt** — renders the backend-provided receipt, competency evidence mappings, and sanitized event timeline.
+- **Home**: the public entry page. Its investigation actions open the internal flow at `#/investigate`.
+- **MissionEntry**: loads the real public mission preview before a session is created. The learner acknowledges the mission and starts one investigation session.
+- **InvestigationWorkSpace**: the full internal workspace for code review, AI chat, suggestions, decisions, verification, evidence, final submission, and follow-up explanation.
+- **EvaluationTransition**: shows real evaluation status. It requests receipt generation once the follow-up answer is successfully persisted and supports retry after an evaluator failure.
+- **CompetencyReceipt**: renders the backend-provided receipt, competency evidence mappings, and sanitized event timeline.
 
 An active in-progress session can be restored from browser session storage. A completed receipt is restored separately and takes precedence over the public entry flow.
 
 ## Technical Architecture
 
-WorkTrace is a small full-stack application.
+WorkTrace is a small full-stack application. I developed it during OpenAI Build Week with Codex and GPT-5.6 as development collaborators.
 
 - The frontend is React and Vite.
 - Redux Toolkit manages the client workflow state and async requests.
@@ -103,14 +108,16 @@ The backend writes investigation events with a per-session sequence number. Evid
 
 The product AI has two separate responsibilities:
 
-- **AI teammate** — Google Gemini receives the supplied mission context, code files, and visible conversation. It returns a structured chat message and, when appropriate, a structured AI suggestion for the learner to evaluate.
-- **Evaluator** — Google Gemini returns structured evaluation data. The backend parses and strictly validates its scores, competency mappings, event IDs, required learner-owned anchors, and summary before a receipt can be stored.
+- **AI teammate**: Google Gemini (`gemini-3.1-flash-lite`) receives the supplied mission context, code files, and visible conversation. It returns a structured chat message and, when appropriate, a structured AI suggestion for the learner to evaluate.
+- **Evaluator**: Google Gemini (`gemini-3.1-flash-lite`) returns structured evaluation data. The backend validates it against strict JSON and evidence-mapping contracts before a Competency Receipt can be stored.
+
+The evaluation pipeline separates the AI provider call from backend validation and receipt generation. The validation layer is model-agnostic: it checks the same JSON contract and persisted evidence mappings before any model output can become a receipt.
 
 The receipt API exposes a public receipt contract and a backend-sanitized timeline. It does not expose the evaluator prompt or private evaluation metadata.
 
 ### Development Tools
 
-Codex and GPT-5.6 were development collaborators during the build. They are not the in-product evaluator.
+I used Codex and GPT-5.6 as development collaborators during the build. They are not the in-product evaluator.
 
 ### Product AI
 
@@ -118,7 +125,7 @@ Google Gemini, through the Gemini API, powers the in-product AI teammate and eva
 
 ## How Codex and GPT-5.6 Helped
 
-Codex and GPT-5.6 helped build and refine the project as hands-on development collaborators. Their work included:
+I used Codex and GPT-5.6 as hands-on development collaborators to build and refine the project. They helped me with:
 
 - building the React/Vite and Node/Express application flow;
 - connecting frontend screens to REST endpoints and Redux Toolkit state;
@@ -136,25 +143,25 @@ Codex and GPT-5.6 helped build and refine the project as hands-on development co
 
 ### Keeping the Timeline Ordered
 
-The receipt needs a trustworthy sequence. The backend assigns an increasing sequence number to every event within a session and reads the timeline in that order.
+I needed a trustworthy sequence for the receipt. The backend assigns an increasing sequence number to every event within a session and reads the timeline in that order.
 
 ### Separating Context From Evidence
 
-AI output is useful context, but it is not proof of learner competency. Suggestion and chat events are attributed to the AI. The evaluator requires learner-owned anchors for each competency dimension.
+I treated AI output as useful context, not proof of learner competency. Suggestion and chat events are attributed to the AI. The evaluator requires learner-owned anchors for each competency dimension.
 
 ### Grounding Evaluator Output
 
-The evaluator must return machine-readable data. The backend validates scores, dimensions, event IDs, unique mappings, and evidence requirements. Invalid output is retried once and then rejected without generating a receipt.
+I needed the evaluator to return machine-readable data. The backend validates scores, dimensions, event IDs, unique mappings, and evidence requirements. Invalid output is retried once and then rejected without generating a receipt.
 
 ### Preserving Work When Evaluation Fails
 
-An evaluator failure does not erase the learner's submitted investigation. The completed submission and follow-up answer remain stored, and the EvaluationTransition provides a retry path.
+I made sure an evaluator failure does not erase the learner's submitted investigation. The completed submission and follow-up answer remain stored, and the EvaluationTransition provides a retry path.
 
 ### Keeping the Receipt Backend-Driven
 
-The frontend renders only the public receipt returned by the backend. Scores, evidence mappings, timestamps, and timeline events are not hardcoded in the receipt view.
+I kept the receipt backend-driven. The frontend renders only the public receipt returned by the backend. Scores, evidence mappings, timestamps, and timeline events are not hardcoded in the receipt view.
 
-## What We Learned
+## What I Learned
 
 - In an AI-native world, the final answer is only one part of the signal.
 - What a person investigated matters.
@@ -174,7 +181,7 @@ The frontend renders only the public receipt returned by the backend. Scores, ev
 
 Share and Export are currently visible in the receipt UI as disabled future actions. They do not yet perform sharing or export behavior.
 
-Our long-term goal is to make AI-native competency portable, so people can carry trusted evidence of how they work, not only what they produce.
+My long-term goal is to make AI-native competency portable, so people can carry trusted evidence of how they work, not only what they produce.
 
 ## Tech Stack
 
@@ -234,10 +241,10 @@ Set these values in `backend/.env`:
 ```dotenv
 PORT=5000
 GEMINI_API_KEY=your_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.1-flash-lite
 ```
 
-Do not commit `.env` or a real API key. `GEMINI_MODEL` is optional; the backend uses `gemini-2.5-flash` by default.
+Do not commit `.env` or a real API key. `GEMINI_MODEL` is optional; the backend uses `gemini-3.1-flash-lite` by default.
 
 ### Start the application
 
@@ -306,10 +313,11 @@ The demo should show:
 
 WorkTrace was built for OpenAI Build Week.
 
-Codex and GPT-5.6 were used throughout development to implement the full-stack product, connect and test the frontend and backend, debug state and persistence problems, tighten the evaluator contract, and verify the final flow from mission entry to receipt. Google Gemini remains the product AI used by the in-app teammate and evaluator.
+I used Codex and GPT-5.6 throughout development to implement the full-stack product, connect and test the frontend and backend, debug state and persistence problems, tighten the evaluator contract, and verify the final flow from mission entry to receipt. Google Gemini remains the product AI used by the in-app teammate and evaluator.
 
 ## Submission Checklist
 
 - **Demo Video URL:** `TODO: add final YouTube URL`
 - **Repository URL:** `TODO: add repository URL`
 - **Codex /feedback Session ID:** `TODO: add session ID`
+
