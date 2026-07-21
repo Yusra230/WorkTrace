@@ -1,14 +1,14 @@
 # WorkTrace
 
-**Competency evidence for AI-native work.**
+**AI changed how people create work. WorkTrace changes how we evaluate it.**
 
-WorkTrace does not only evaluate a final answer. It records how a person investigates a problem, works with AI, checks suggestions, makes decisions, and explains their reasoning.
+WorkTrace captures competency evidence for AI-native work. It records how a person investigates a problem, works with AI, checks suggestions, makes decisions, and explains their reasoning.
 
 ## The Problem
 
-In AI-assisted work, a polished final answer is no longer enough.
+AI makes polished output easier to produce. That makes traditional assessment less reliable when it measures only the final result.
 
-A person can use AI to produce a strong answer without showing whether they understood the problem, checked the evidence, verified the AI output, or made the decision themselves. A final-answer-only assessment misses that process.
+A strong answer alone cannot show whether someone understood the problem, checked the evidence, verified the AI output, or made the decision themselves. Final-answer-only assessment misses the work that led to the answer.
 
 ## The Idea
 
@@ -17,6 +17,14 @@ WorkTrace turns the process behind AI-assisted work into structured evidence.
 The learner investigates a realistic mission in a provided codebase. They can ask an AI teammate for help, evaluate an AI suggestion, collect evidence, submit a solution, and give an independent explanation of their reasoning.
 
 At the end, WorkTrace produces a **Competency Receipt**. It is an evidence-grounded evaluator assessment linked to the recorded investigation timeline. It is not a claim of objective truth about a person. It is a transparent record of the evidence used for the assessment.
+
+The core insight: work that is usually invisible can become evidence a reviewer can inspect.
+
+## Why Now?
+
+AI-native work is becoming normal in software engineering, education, and hiring. People increasingly use AI to research, write, debug, and decide. Organizations still need a fair way to understand how that work happened.
+
+The question is no longer only, “What did this person produce?” It is also, “How did they work with AI, evidence, and judgment to produce it?” WorkTrace is built for that gap.
 
 ## How It Works
 
@@ -67,7 +75,7 @@ They help people produce answers. They usually do not show how a person reasoned
 
 They evaluate the output. They can miss the investigation, evidence selection, verification, and decision-making behind it.
 
-WorkTrace focuses on the process behind the result.
+WorkTrace evaluates the process behind the answer, not only the answer itself.
 
 ## Product Flow
 
@@ -165,6 +173,8 @@ The frontend renders only the public receipt returned by the backend. Scores, ev
 - Export functionality.
 
 Share and Export are currently visible in the receipt UI as disabled future actions. They do not yet perform sharing or export behavior.
+
+Our long-term goal is to make AI-native competency portable, so people can carry trusted evidence of how they work, not only what they produce.
 
 ## Tech Stack
 
