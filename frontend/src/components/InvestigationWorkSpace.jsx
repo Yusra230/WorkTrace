@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import Editor from "@monaco-editor/react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   Fingerprint,
@@ -18,7 +19,6 @@ import {
   ClipboardList,
   Sparkles,
   CircleDot,
-  Lock,
   ArrowRight,
   FlaskConical,
   ScaleIcon,
@@ -84,6 +84,51 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] } },
 };
 
+export function getCodeLanguage(filePath = "") {
+  return /\.(?:jsx?|mjs|cjs)$/i.test(filePath) ? "javascript" : "plaintext";
+}
+
+export function getCodeViewerHeight(content = "", viewportHeight = 900) {
+  const lineCount = Math.max(1, String(content).split("\n").length);
+  const contentHeight = lineCount * 22 + 32;
+  const viewportCap = Math.min(672, Math.max(280, Math.round(viewportHeight * 0.58)));
+  return Math.min(Math.max(176, contentHeight), viewportCap);
+}
+
+function configureWorktraceEditor(monaco) {
+  monaco.editor.defineTheme("worktrace-investigation", {
+    base: "vs-dark",
+    inherit: true,
+    colors: {
+      "editor.background": "#131315",
+      "editor.foreground": "#EDEDEE",
+      "editorLineNumber.foreground": "#5A5A5E",
+      "editorLineNumber.activeForeground": "#8C8C92",
+      "editorCursor.foreground": "#D7FF3F",
+      "editor.selectionBackground": "#D7FF3F24",
+      "editor.inactiveSelectionBackground": "#D7FF3F16",
+      "editor.lineHighlightBackground": "#1A1A1D",
+      "editorGutter.background": "#131315",
+      "scrollbarSlider.background": "#D7FF3F66",
+      "scrollbarSlider.hoverBackground": "#D7FF3F99",
+      "scrollbarSlider.activeBackground": "#D7FF3FCC",
+    },
+    rules: [
+      { token: "keyword", foreground: "D7FF3F" },
+      { token: "string", foreground: "59E8A6" },
+      { token: "comment", foreground: "6B6B72", fontStyle: "italic" },
+      { token: "number", foreground: "FFB86C" },
+      { token: "delimiter", foreground: "C7C7CD" },
+      { token: "identifier", foreground: "EDEDEE" },
+      { token: "type.identifier", foreground: "7FB2FF" },
+    ],
+  });
+}
+
+function isNearScrollBottom(element, threshold = 56) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}
+
 function AttributionTag({ who }) {
   const a = attributionStyle[who];
   const Icon = a.icon;
@@ -119,11 +164,11 @@ function EvidenceMarker({ who, evidenceType }) {
 }
 
 const competencyCopy = [
-  { n: "01", label: "Problem Framing", metText: "Investigation reasoning or selected evidence captured", pendingText: "Awaiting investigation reasoning or selected evidence" },
-  { n: "02", label: "AI Verification", metText: "Learner verification recorded", pendingText: "Awaiting a recorded learner verification" },
-  { n: "03", label: "Independent Judgment", metText: "Decision and independent explanation recorded", pendingText: "Awaiting independent decision and explanation" },
-  { n: "04", label: "Technical Execution", metText: "Final solution submitted", pendingText: "Awaiting final solution" },
-  { n: "05", label: "Communication", metText: "Final solution or independent explanation recorded", pendingText: "Awaiting final solution or independent explanation" },
+  { n: "01", label: "Problem Framing", metText: "Evidence captured", pendingText: "Awaiting investigation evidence" },
+  { n: "02", label: "AI Verification", metText: "Verification recorded", pendingText: "Awaiting verification" },
+  { n: "03", label: "Independent Judgment", metText: "Decision and explanation recorded", pendingText: "Awaiting decision and explanation" },
+  { n: "04", label: "Technical Execution", metText: "Final solution recorded", pendingText: "Awaiting final solution" },
+  { n: "05", label: "Communication", metText: "Explanation recorded", pendingText: "Awaiting final solution or explanation" },
 ];
 
 export default function InvestigationWorkspace() {
@@ -140,22 +185,31 @@ export default function InvestigationWorkspace() {
   const isWorkspace = currentView === applicationViews.WORKSPACE;
   const isSubmission = currentView === applicationViews.SUBMISSION;
   const isFollowUp = currentView === applicationViews.FOLLOW_UP;
-  const phase = isSubmission ? "submitting" : isFollowUp ? "submitted" : "investigating";
+  const isEvaluating = currentView === applicationViews.EVALUATING;
+  const hasSubmittedFollowUp = Boolean(followUp.submittedAnswer);
   const [note, setNote] = useState("");
   const [seconds, setSeconds] = useState(0);
   const [tab, setTab] = useState("code");
-  const scrollRef = useRef(null);
+  const [viewportHeight, setViewportHeight] = useState(() => typeof window === "undefined" ? 900 : window.innerHeight);
+  const conversationScrollRef = useRef(null);
+  const shouldFocusConversationRef = useRef(false);
+  const shouldAutoScrollConversationRef = useRef(true);
+  const previousChatCountRef = useRef(chatTranscript.length);
   const [independentOpen, setIndependentOpen] = useState(false);
   const [independentText, setIndependentText] = useState("");
   const timeline = [
     ...(mission ? [{ id: "mission", eventType: "mission", body: mission.description || mission.title || "Mission started" }] : []),
-    ...chatTranscript.map((message) => ({ id: message.id, eventType: message.role === "teammate" ? "ai_response" : "user_prompt", body: message.content })),
+    ...chatTranscript.map((message) => ({ id: message.id, eventType: message.role === "teammate" ? "ai_response" : "user_prompt", body: message.content, status: message.status })),
     ...evidenceItems.map((item) => ({ id: item.id, eventType: "evidence_collected", body: item.description || item.title })),
     ...(offeredSuggestion ? [{ id: suggestionId || "suggestion", eventType: "suggestion_offered", body: offeredSuggestion.message, pending: !suggestionDecision }] : []),
     ...(suggestionDecision ? [{ id: `decision-${suggestionDecision}`, eventType: suggestionDecision === "accepted" ? "suggestion_accepted" : "suggestion_rejected", body: `${suggestionDecision === "accepted" ? "Accepted" : "Rejected"} the AI suggestion.` }] : []),
     ...(verification.status === "completed" ? [{ id: "verification", eventType: "suggestion_verified", body: verification.rationale || "Verification recorded." }] : []),
     ...(submission.solution ? [{ id: "submission", eventType: "submission", body: submission.solution }] : []),
-    ...(followUp.answer ? [{ id: "follow-up", eventType: "follow_up_answer", body: followUp.answer }] : []),
+    ...(hasSubmittedFollowUp ? [{ id: "follow-up", eventType: "follow_up_answer", body: followUp.submittedAnswer }] : []),
+  ];
+  const conversationTimeline = [
+    ...(mission ? [{ id: "mission", eventType: "mission", body: mission.description || mission.title || "Mission started" }] : []),
+    ...chatTranscript.map((message) => ({ id: message.id, eventType: message.role === "teammate" ? "ai_response" : "user_prompt", body: message.content, status: message.status })),
   ];
 
 
@@ -166,8 +220,29 @@ export default function InvestigationWorkspace() {
   }, []);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [timeline, tab]);
+    const updateViewportHeight = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("resize", updateViewportHeight);
+    return () => window.removeEventListener("resize", updateViewportHeight);
+  }, []);
+
+  useEffect(() => {
+    const hasNewChat = chatTranscript.length > previousChatCountRef.current;
+    previousChatCountRef.current = chatTranscript.length;
+    if (!hasNewChat) return;
+
+    const wasNewSubmission = shouldFocusConversationRef.current;
+    const shouldScroll = wasNewSubmission || shouldAutoScrollConversationRef.current;
+    shouldFocusConversationRef.current = false;
+    if (wasNewSubmission) setTab("timeline");
+
+    if (!shouldScroll) return;
+    requestAnimationFrame(() => {
+      const container = conversationScrollRef.current;
+      if (!container) return;
+      container.scrollTo?.({ top: container.scrollHeight, behavior: "smooth" });
+      shouldAutoScrollConversationRef.current = true;
+    });
+  }, [chatTranscript.length]);
 
   useEffect(() => {
     if (isSubmission) setTab("submission");
@@ -181,6 +256,7 @@ export default function InvestigationWorkspace() {
   const decisionEvents = timeline.filter((e) => ["suggestion_accepted", "suggestion_rejected", "user_decision"].includes(e.eventType));
   const verificationEvents = timeline.filter((e) => e.eventType === "suggestion_verified");
   const followupEvents = timeline.filter((e) => e.eventType === "follow_up_answer");
+  const decisionAndVerificationEvents = timeline.filter((e) => ["suggestion_accepted", "suggestion_rejected", "user_decision", "suggestion_verified"].includes(e.eventType));
 
   function resolveSuggestion(outcome, reasoning) {
     if (outcome === "independent") {
@@ -198,9 +274,16 @@ export default function InvestigationWorkspace() {
   }
 
   function addNote() {
-    if (!note.trim()) return;
+    if (!note.trim() || loading.sendChat) return;
+    shouldFocusConversationRef.current = true;
+    shouldAutoScrollConversationRef.current = true;
+    setTab("timeline");
     dispatch(sendChat(note.trim()));
     setNote("");
+  }
+
+  function handleConversationScroll(event) {
+    shouldAutoScrollConversationRef.current = isNearScrollBottom(event.currentTarget);
   }
 
   function submitFinalSolution() {
@@ -209,7 +292,7 @@ export default function InvestigationWorkspace() {
   }
 
   function submitFollowup() {
-    if (!followUp.answer.trim()) return;
+    if (!followUp.answer.trim() || loading.submitFollowUp || hasSubmittedFollowUp) return;
     dispatch(submitFollowUp());
   }
 
@@ -258,7 +341,7 @@ export default function InvestigationWorkspace() {
           </div>
           <span className="hidden md:inline-flex items-center gap-2 text-xs text-[#59E8A6]">
             <CircleDot size={10} className="fill-[#59E8A6]" />
-            {loading.sendChat ? "AI teammate is responding" : isFollowUp ? "Follow-up in progress" : isSubmission ? "Final proposal" : "Investigation active"}
+            {loading.sendChat ? "AI teammate is responding" : isEvaluating ? "Follow-up complete" : isFollowUp ? "Follow-up in progress" : isSubmission ? "Final proposal" : "Investigation active"}
           </span>
 
           {isWorkspace && verification.status === "completed" && (
@@ -267,13 +350,13 @@ export default function InvestigationWorkspace() {
               <ArrowRight size={14} />
             </button>
           )}
-          {phase === "submitted" && (
+          {isFollowUp && (
             <span className="flex items-center gap-2 px-4 py-2 rounded-md border border-[#232326] text-sm text-[#8C8C92]">
               <FileCheck2 size={14} className="text-[#59E8A6]" />
               Solution recorded — follow-up pending
             </span>
           )}
-          {phase === "evaluating" && (
+          {isEvaluating && (
             <span className="flex items-center gap-2 px-4 py-2 rounded-md border border-[#232326] text-sm text-[#8C8C92]">
               <Loader2 size={14} className="animate-spin text-[#D7FF3F]" />
               Generating Competency Receipt
@@ -294,7 +377,7 @@ export default function InvestigationWorkspace() {
           initial={{ x: -24, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ duration: 0.4, delay: 0.05 }}
-          className="hidden lg:flex flex-col border-r border-[#232326] bg-[#0F0F10] overflow-y-auto"
+          className="worktrace-internal-scroll hidden lg:flex flex-col border-r border-[#232326] bg-[#0F0F10] overflow-y-auto"
         >
           <div className="p-5 border-b border-[#1c1c1e]">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-[#8C8C92] mb-3">
@@ -396,9 +479,9 @@ export default function InvestigationWorkspace() {
             })}
           </div>
 
-          <div className="flex-1 overflow-y-auto" ref={tab === "code" ? null : scrollRef}>
+          <div className="flex-1 min-h-0 overflow-hidden">
             {tab === "code" && (
-              <motion.div key={activeFilePath} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="p-6">
+              <motion.div key={activeFilePath} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="worktrace-code-pane h-full overflow-y-auto p-6">
                 <div className="flex items-center gap-2 mb-4 text-xs text-[#8C8C92]">
                   <Folder size={13} />
                   {activeFilePath}
@@ -409,19 +492,37 @@ export default function InvestigationWorkspace() {
                     <span className="w-2.5 h-2.5 rounded-full bg-[#D7FF3F]/60" />
                     <span className="w-2.5 h-2.5 rounded-full bg-[#59E8A6]/60" />
                   </div>
-                  <pre className="p-5 text-[13px] leading-relaxed overflow-x-auto" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                    {(activeFile?.content || "No file content is available.").split("\n").map((line, i) => (
-                      <div key={i} className="flex gap-4">
-                        <span className="text-[#5a5a5e] select-none w-6 text-right shrink-0">{i + 1}</span>
-                        <span className="text-[#EDEDEE]/90">{line}</span>
-                      </div>
-                    ))}
-                  </pre>
+                  <div className="worktrace-code-editor" aria-label={`${activeFilePath} read-only source code`}>
+                    <Editor
+                      beforeMount={configureWorktraceEditor}
+                      defaultLanguage="javascript"
+                      language={getCodeLanguage(activeFilePath)}
+                      loading={<div className="p-5 font-mono text-xs text-[#8C8C92]">Loading source…</div>}
+                      options={{
+                        automaticLayout: true,
+                        contextmenu: false,
+                        fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
+                        fontSize: 13,
+                        lineHeight: 22,
+                        lineNumbers: "on",
+                        minimap: { enabled: false },
+                        overviewRulerLanes: 0,
+                        padding: { top: 16, bottom: 16 },
+                        readOnly: true,
+                        renderLineHighlight: "all",
+                        scrollBeyondLastLine: false,
+                        smoothScrolling: true,
+                        wordWrap: "off",
+                      }}
+                      theme="worktrace-investigation"
+                      value={activeFile?.content || "No file content is available."}
+                      height={getCodeViewerHeight(activeFile?.content, viewportHeight)}
+                    />
+                  </div>
                 </div>
 
                 <button
                   onClick={() => dispatch(collectEvidence({
-                    id: `file-${activeFilePath}`,
                     title: activeFilePath,
                     description: `Reviewed ${activeFilePath} as part of the investigation.`,
                     source: "Learner investigation",
@@ -430,18 +531,26 @@ export default function InvestigationWorkspace() {
                     linkedHypothesisId: suggestionId || null,
                     createdBy: "learner",
                   }))}
-                  className="mt-4 flex items-center gap-2 px-4 py-2 rounded-md border border-[#232326] text-sm text-[#EDEDEE]/80 hover:border-[#59E8A6]/50 hover:text-[#59E8A6] transition-colors"
+                  disabled={loading.persistEvidence}
+                  className="mt-4 flex items-center gap-2 px-4 py-2 rounded-md border border-[#232326] text-sm text-[#EDEDEE]/80 hover:border-[#59E8A6]/50 hover:text-[#59E8A6] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <FileSearch size={14} />
-                  Mark as selected evidence
+                  {loading.persistEvidence ? "Saving selected evidence…" : "Mark as selected evidence"}
                 </button>
               </motion.div>
             )}
 
             {tab === "timeline" && (
-              <div className="p-6 space-y-4">
+              <div
+                ref={conversationScrollRef}
+                onScroll={handleConversationScroll}
+                data-testid="conversation-scroll-region"
+                className="worktrace-conversation-scroll h-full overflow-y-auto overscroll-contain"
+                aria-label="AI Conversation"
+              >
+                <div className="p-6 space-y-4">
                 <AnimatePresence initial={false}>
-                  {timeline.map((e) => {
+                  {conversationTimeline.map((e) => {
                     const meta = EVENT_META[e.eventType] || { who: "system", evidenceType: null };
                     return (
                       <motion.div
@@ -461,7 +570,14 @@ export default function InvestigationWorkspace() {
                               {e.eventType}
                             </span>
                           </div>
-                          {e.pending ? (
+                          {e.status === "pending" ? (
+                            <span className="flex items-center gap-1 text-[10px] text-[#7FB2FF]">
+                              <Loader2 size={10} className="animate-spin" />
+                              Thinking…
+                            </span>
+                          ) : e.status === "failed" ? (
+                            <span className="text-[10px] text-[#FF6A57]">Not delivered</span>
+                          ) : e.pending ? (
                             <span className="flex items-center gap-1 text-[10px] text-[#8C8C92]">
                               <span className="flex gap-0.5">
                                 {[0, 1, 2].map((i) => (
@@ -479,11 +595,13 @@ export default function InvestigationWorkspace() {
                     );
                   })}
                 </AnimatePresence>
+                </div>
               </div>
             )}
 
             {tab === "submission" && (
-              <div className="p-6 max-w-2xl">
+              <div className="worktrace-internal-scroll h-full overflow-y-auto p-6">
+                <div className="max-w-2xl">
                 <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-[#8C8C92] mb-3"><span className="h-px w-4 bg-[#D7FF3F]" />Final solution</div>
                 <h3 className="text-lg mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Document your recommended fix.</h3>
                 <p className="text-sm text-[#8C8C92] mb-5 leading-relaxed">State the solution, then explain the evidence and verification behind it.</p>
@@ -491,11 +609,13 @@ export default function InvestigationWorkspace() {
                 <textarea value={submission.justification} onChange={(event) => dispatch(setSubmissionField({ field: "justification", value: event.target.value }))} rows={5} placeholder="Explain why the evidence supports this decision…" className="mt-3 w-full bg-[#131315] border border-[#232326] rounded-md px-4 py-3 text-sm placeholder:text-[#5a5a5e] focus:outline-none focus:border-[#D7FF3F]/50 resize-none" />
                 {recoverableError && <p role="alert" className="mt-3 text-sm text-[#FF6A57]">{recoverableError}</p>}
                 <button disabled={loading.submitSolution || !submission.solution.trim() || !submission.justification.trim()} onClick={submitFinalSolution} className="mt-4 flex items-center gap-2 px-4 py-2 rounded-md bg-[#D7FF3F] text-black text-sm font-medium hover:bg-white transition-colors disabled:opacity-60">{loading.submitSolution ? "Submitting…" : "Submit as Final Solution"}<ArrowRight size={14} /></button>
+                </div>
               </div>
             )}
 
             {tab === "followup" && (
-              <div className="p-6 max-w-2xl">
+              <div className="worktrace-internal-scroll h-full overflow-y-auto p-6">
+                <div className="max-w-2xl">
                 <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-[#8C8C92] mb-3">
                   <span className="h-px w-4 bg-[#D7FF3F]" />
                   Follow-up Question
@@ -507,7 +627,7 @@ export default function InvestigationWorkspace() {
                   {followUp.question || "Why did you reach this conclusion? What evidence influenced your decision, what did you accept or reject from the AI teammate, and how did you verify it?"}
                 </p>
 
-                {followupEvents.length === 0 ? (
+                {!hasSubmittedFollowUp ? (
                   <>
                     <textarea
                       value={followUp.answer}
@@ -517,8 +637,8 @@ export default function InvestigationWorkspace() {
                       placeholder="The issue is caused by X because the evidence shows Y. I rejected the alternative because Z…"
                       className="w-full bg-[#131315] border border-[#232326] rounded-md px-4 py-3 text-sm placeholder:text-[#5a5a5e] focus:outline-none focus:border-[#D7FF3F]/50 resize-none"
                     />
-                    <button disabled={loading.submitFollowUp} onClick={submitFollowup} className="mt-4 flex items-center gap-2 px-4 py-2 rounded-md bg-[#D7FF3F] text-black text-sm font-medium hover:bg-white transition-colors disabled:opacity-60">
-                      {loading.submitFollowUp ? "Submitting…" : "Submit Explanation"}
+                    <button disabled={loading.submitFollowUp || !followUp.answer.trim()} onClick={submitFollowup} className="mt-4 flex items-center gap-2 px-4 py-2 rounded-md bg-[#D7FF3F] text-black text-sm font-medium hover:bg-white transition-colors disabled:opacity-60">
+                      {loading.submitFollowUp ? "Submitting…" : "Submit Answer"}
                       <ArrowRight size={14} />
                     </button>
                   </>
@@ -528,16 +648,17 @@ export default function InvestigationWorkspace() {
                       <AttributionTag who="learner" />
                       <span className="text-[11px] text-[#59E8A6]">independent_explanation</span>
                     </div>
-                    <p className="text-sm text-[#EDEDEE]/90 leading-relaxed">{followupEvents[followupEvents.length - 1].body}</p>
+                      <p className="text-sm text-[#EDEDEE]/90 leading-relaxed">{followUp.submittedAnswer}</p>
                   </div>
                 )}
 
-                {phase === "evaluating" && (
+                {isEvaluating && (
                   <div className="mt-8 flex items-center gap-3 text-sm text-[#8C8C92]">
                     <Loader2 size={16} className="animate-spin text-[#D7FF3F]" />
                     The evaluator is grounding your Competency Receipt in this evidence timeline.
                   </div>
                 )}
+                </div>
               </div>
             )}
           </div>
@@ -547,12 +668,25 @@ export default function InvestigationWorkspace() {
               <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addNote()}
-                placeholder="Add an investigation note or ask the AI teammate…"
-                className="flex-1 bg-[#131315] border border-[#232326] rounded-md px-4 py-2.5 text-sm placeholder:text-[#5a5a5e] focus:outline-none focus:border-[#D7FF3F]/50"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addNote();
+                  }
+                }}
+                disabled={loading.sendChat}
+                aria-busy={loading.sendChat}
+                placeholder={loading.sendChat ? "Thinking…" : "Add an investigation note or ask the AI teammate…"}
+                className="flex-1 bg-[#131315] border border-[#232326] rounded-md px-4 py-2.5 text-sm placeholder:text-[#5a5a5e] focus:outline-none focus:border-[#D7FF3F]/50 disabled:cursor-wait disabled:opacity-60"
               />
-              <button onClick={addNote} className="w-10 h-10 rounded-md bg-[#D7FF3F] text-black flex items-center justify-center hover:bg-white transition-colors shrink-0">
-                <Send size={15} />
+              <button
+                type="button"
+                onClick={addNote}
+                disabled={loading.sendChat || !note.trim()}
+                aria-label={loading.sendChat ? "AI teammate is thinking" : "Send investigation note"}
+                className="w-10 h-10 rounded-md bg-[#D7FF3F] text-black flex items-center justify-center hover:bg-white transition-colors shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading.sendChat ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
               </button>
             </div>
           )}
@@ -562,7 +696,7 @@ export default function InvestigationWorkspace() {
           initial={{ x: 24, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ duration: 0.4, delay: 0.1 }}
-          className="hidden lg:flex flex-col bg-[#0F0F10] overflow-y-auto"
+          className="worktrace-internal-scroll hidden lg:flex flex-col bg-[#0F0F10] overflow-y-auto"
         >
           <div className="p-5 border-b border-[#1c1c1e]">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-[#8C8C92] mb-3">
@@ -652,13 +786,15 @@ export default function InvestigationWorkspace() {
               Decision &amp; Verification Log
             </div>
             <div className="space-y-2">
-              {[...decisionEvents, ...verificationEvents].length === 0 && <p className="text-xs text-[#5a5a5e] italic">No decisions recorded yet.</p>}
-              {[...decisionEvents, ...verificationEvents]
-                .sort((a, b) => (a.id > b.id ? 1 : -1))
-                .map((e) => (
+              {decisionAndVerificationEvents.length === 0 ? (
+                <div className="text-xs text-[#8C8C92]">
+                  <p>No decisions or verifications recorded yet.</p>
+                  <p className="mt-1 text-[#5A5A5E]">Your decisions and verification notes will appear here as you work.</p>
+                </div>
+              ) : decisionAndVerificationEvents.map((e) => (
                   <motion.div key={e.id} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="flex items-start gap-2 text-xs text-[#EDEDEE]/80 bg-[#131315] border border-[#232326] rounded-md px-3 py-2">
                     {e.eventType === "suggestion_verified" ? <FlaskConical size={12} className="text-[#59E8A6] mt-0.5 shrink-0" /> : <ScaleIcon size={12} className="text-[#D7FF3F] mt-0.5 shrink-0" />}
-                    {e.title}
+                    {e.body}
                   </motion.div>
                 ))}
             </div>
@@ -680,9 +816,9 @@ export default function InvestigationWorkspace() {
                         {c.label}
                       </span>
                     </div>
-                    <div className={`flex items-start gap-1.5 text-[11px] ${met ? "text-[#59E8A6]" : "text-[#5a5a5e]"}`}>
-                      {met ? <Check size={11} className="mt-0.5 shrink-0" /> : <Lock size={11} className="mt-0.5 shrink-0" />}
-                      {met ? c.metText : c.pendingText}
+                    <div className={`flex items-start gap-1.5 text-[11px] ${met ? "text-[#59E8A6]" : "text-[#8C8C92]"}`}>
+                      {met ? <Check size={11} className="mt-0.5 shrink-0" /> : <CircleDot size={11} className="mt-0.5 shrink-0" />}
+                      <span><strong className="font-medium">{met ? "Complete" : "Incomplete"}</strong><br />{met ? c.metText : c.pendingText}</span>
                     </div>
                   </div>
                 );

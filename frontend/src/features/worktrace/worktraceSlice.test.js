@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import reducer, { addEvidence, applicationViews, collectEvidence, generateReceipt, hydrateActiveSession, initialState, persistEvidence, recordSuggestionDecision, restoreReceipt, sendChat, startSession, submitFollowUp, submitSolution, verifySuggestionDecision } from './worktraceSlice';
+import reducer, { addEvidence, applicationViews, collectEvidence, generateReceipt, hydrateActiveSession, initialState, persistEvidence, recordSuggestionDecision, restoreReceipt, sendChat, setFollowUpAnswer, startSession, submitFollowUp, submitSolution, verifySuggestionDecision } from './worktraceSlice';
 
 describe('worktraceSlice', () => {
   it('stores the session and enters the workspace after session start succeeds', () => {
@@ -42,8 +42,9 @@ describe('worktraceSlice', () => {
     expect(nextState.loading.startSession).toBe(false);
   });
 
-  it('adds chat messages only after the teammate response succeeds', () => {
+  it('adds the learner message immediately, then appends the teammate response in order', () => {
     const activeState = { ...initialState, sessionId: 'session-123' };
+    const message = 'What changed recently?';
     const payload = {
       message: 'What changed recently?',
       response: {
@@ -52,11 +53,12 @@ describe('worktraceSlice', () => {
         suggestion_id: 'suggestion-123'
       }
     };
-    const nextState = reducer(activeState, sendChat.fulfilled(payload, 'request-2', payload.message));
+    const pendingState = reducer(activeState, sendChat.pending('request-2', message));
+    const nextState = reducer(pendingState, sendChat.fulfilled(payload, 'request-2', message));
 
     expect(nextState.chatTranscript).toEqual([
-      { id: 'learner-1', role: 'learner', content: payload.message },
-      { id: 'teammate-2', role: 'teammate', content: payload.response.ai_response }
+      { id: 'learner-request-2', requestId: 'request-2', role: 'learner', content: message, status: 'sent' },
+      { id: 'teammate-request-2', role: 'teammate', content: payload.response.ai_response, status: 'sent' }
     ]);
     expect(nextState.suggestionId).toBe('suggestion-123');
     expect(nextState.offeredSuggestion).toEqual({ message: payload.response.ai_response });
@@ -87,6 +89,37 @@ describe('worktraceSlice', () => {
     expect(submittedState.currentView).toBe(applicationViews.FOLLOW_UP);
     expect(evaluationState.currentView).toBe(applicationViews.EVALUATING);
     expect(evaluationState.evaluation.status).toBe('ready');
+  });
+
+  it('keeps a follow-up answer as a draft until the successful explicit submission commits it', () => {
+    const followUpState = reducer(initialState, submitSolution.fulfilled({ success: true, follow_up_question: 'Why did you choose this solution?' }, 'request-5'));
+    const draftState = reducer(followUpState, setFollowUpAnswer('I rejected the timeout hypothesis because the provided request path needs direct verification.'));
+    const pendingState = reducer(draftState, submitFollowUp.pending('request-6'));
+    const completedState = reducer(pendingState, submitFollowUp.fulfilled({ success: true, ready_for_evaluation: true, answer: draftState.followUp.answer }, 'request-6'));
+
+    expect(draftState.followUp.answer).toContain('I rejected the timeout hypothesis');
+    expect(draftState.followUp.submittedAnswer).toBe('');
+    expect(pendingState.followUp.submittedAnswer).toBe('');
+    expect(completedState.followUp.answer).toBe('');
+    expect(completedState.followUp.submittedAnswer).toContain('I rejected the timeout hypothesis');
+    expect(completedState.currentView).toBe(applicationViews.EVALUATING);
+    expect(completedState.evaluation.status).toBe('ready');
+  });
+
+  it('keeps a failed follow-up draft editable and uncommitted', () => {
+    const draftState = {
+      ...initialState,
+      sessionId: 'session-123',
+      currentView: applicationViews.FOLLOW_UP,
+      followUp: { question: 'Explain your decision.', answer: 'My independent explanation.', submittedAnswer: '' }
+    };
+    const pendingState = reducer(draftState, submitFollowUp.pending('request-6'));
+    const failedState = reducer(pendingState, submitFollowUp.rejected(new Error('offline'), 'request-6', undefined, 'Unable to submit your explanation.'));
+
+    expect(failedState.followUp.answer).toBe('My independent explanation.');
+    expect(failedState.followUp.submittedAnswer).toBe('');
+    expect(failedState.currentView).toBe(applicationViews.FOLLOW_UP);
+    expect(failedState.errorScope).toBe('follow-up');
   });
 
   it('tracks receipt generation loading and moves to the final receipt on success', () => {
@@ -154,16 +187,17 @@ describe('worktraceSlice', () => {
     expect(duplicateAttempt.evidenceError).toBe('This evidence is already on the board.');
   });
 
-  it('marks evidence persisted only after the event log succeeds and surfaces a failed write', () => {
+  it('stores only the persisted backend evidence UUID and surfaces a failed write', () => {
     const evidence = {
-      id: 'evidence-1', title: 'Observed timing', description: 'Failures begin on July 14.', source: 'Mission signal', type: 'data', relation: 'neutral', linkedHypothesisId: null, createdBy: 'learner'
+      title: 'Observed timing', description: 'Failures begin on July 14.', source: 'Mission signal', type: 'data', relation: 'neutral', linkedHypothesisId: null, createdBy: 'learner'
     };
-    const pendingState = reducer({ ...initialState, sessionId: 'session-123' }, addEvidence(evidence));
-    const savedState = reducer(pendingState, persistEvidence.fulfilled({ evidenceId: evidence.id, eventId: 'event-123' }, 'request-evidence', evidence));
+    const pendingState = reducer({ ...initialState, sessionId: 'session-123' }, persistEvidence.pending('request-evidence', evidence));
+    const persistedEvidence = { ...evidence, id: '9f8c3e6a-a938-4b6d-9a43-02521055ca9b' };
+    const savedState = reducer(pendingState, persistEvidence.fulfilled({ evidence: persistedEvidence, eventId: 'event-123' }, 'request-evidence', evidence));
     const failedState = reducer(pendingState, persistEvidence.rejected(new Error('offline'), 'request-evidence', evidence, 'Unable to save evidence to the mission timeline.'));
 
-    expect(savedState.evidenceItems[0]).toMatchObject({ persistenceStatus: 'persisted', eventId: 'event-123' });
-    expect(failedState.evidenceItems[0].persistenceStatus).toBe('failed');
+    expect(savedState.evidenceItems[0]).toMatchObject({ id: persistedEvidence.id, persistenceStatus: 'persisted', eventId: 'event-123' });
+    expect(failedState.evidenceItems).toHaveLength(0);
     expect(failedState.evidenceError).toBe('Unable to save evidence to the mission timeline.');
     expect(failedState.errorScope).toBe('evidence');
   });

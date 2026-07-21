@@ -71,28 +71,30 @@ function buildEvaluationMetadata(ai, evaluationInput) {
   };
 }
 
-function validateEvaluation(evaluation, timeline) {
-  if (!evaluation || typeof evaluation !== 'object') return null;
+function inspectEvaluation(evaluation, timeline) {
+  const invalid = (code) => ({ validated: null, failure: code });
+  if (!evaluation || typeof evaluation !== 'object') return invalid('response_not_an_object');
   const scores = evaluation.scores;
   if (!scores || typeof scores !== 'object' || !DIMENSIONS.every((key) => Number.isFinite(scores[key]) && scores[key] >= 0 && scores[key] <= 100)) {
-    return null;
+    return invalid('invalid_scores');
   }
   if (!Array.isArray(evaluation.evidence) || typeof evaluation.narrative_summary !== 'string' || !evaluation.narrative_summary.trim()) {
-    return null;
+    return invalid('missing_evidence_or_summary');
   }
-  if (evaluation.evidence.length !== DIMENSIONS.length) return null;
+  if (evaluation.evidence.length !== DIMENSIONS.length) return invalid('incorrect_evidence_mapping_count');
   const eventById = new Map(timeline.map((event) => [event.event_id, event]));
   const evidence = [];
   const mappedDimensions = new Set();
   for (const item of evaluation.evidence) {
     if (!item || !DIMENSIONS.includes(item.dimension) || !Array.isArray(item.event_ids) || typeof item.explanation !== 'string' || !item.explanation.trim()) {
-      return null;
+      return invalid('invalid_evidence_mapping_shape');
     }
-    if (mappedDimensions.has(item.dimension)) return null;
+    if (mappedDimensions.has(item.dimension)) return invalid('duplicate_evidence_dimension');
     const uniqueIds = [...new Set(item.event_ids)];
-    if (!uniqueIds.length || uniqueIds.length !== item.event_ids.length || !uniqueIds.every((id) => eventById.has(id))) return null;
+    if (!uniqueIds.length || uniqueIds.length !== item.event_ids.length) return invalid('invalid_evidence_event_ids');
+    if (!uniqueIds.every((id) => eventById.has(id))) return invalid('unknown_evidence_event_id');
     const mappedEvents = uniqueIds.map((id) => eventById.get(id));
-    if (!hasRequiredAnchors(item.dimension, mappedEvents)) return null;
+    if (!hasRequiredAnchors(item.dimension, mappedEvents)) return invalid(`missing_required_anchor:${item.dimension}`);
     mappedDimensions.add(item.dimension);
     evidence.push({
       dimension: item.dimension,
@@ -101,8 +103,12 @@ function validateEvaluation(evaluation, timeline) {
       explanation: redactSensitiveText(item.explanation.trim())
     });
   }
-  if (mappedDimensions.size !== DIMENSIONS.length) return null;
-  return { scores, evidence, narrative_summary: redactSensitiveText(evaluation.narrative_summary.trim()) };
+  if (mappedDimensions.size !== DIMENSIONS.length) return invalid('missing_evidence_dimension');
+  return { validated: { scores, evidence, narrative_summary: redactSensitiveText(evaluation.narrative_summary.trim()) }, failure: null };
+}
+
+function validateEvaluation(evaluation, timeline) {
+  return inspectEvaluation(evaluation, timeline).validated;
 }
 
 function publicReceipt(receipt) {
@@ -173,13 +179,16 @@ function createReceiptRouter({ db, mission, ai, sessionLock }) {
         follow_up_answer: db.getFollowUp(sessionId)
       };
 
-      let validated = validateEvaluation(await ai.evaluate(evaluationInput), timelineForEvaluation);
-      if (!validated) {
-        validated = validateEvaluation(await ai.evaluate(evaluationInput, true), timelineForEvaluation);
+      let evaluationResult = inspectEvaluation(await ai.evaluate(evaluationInput), timelineForEvaluation);
+      if (!evaluationResult.validated) {
+        console.warn(`[worktrace] evaluator_contract_retry ${evaluationResult.failure}`);
+        evaluationResult = inspectEvaluation(await ai.evaluate(evaluationInput, true), timelineForEvaluation);
       }
-      if (!validated) {
+      if (!evaluationResult.validated) {
+        console.warn(`[worktrace] evaluator_contract_invalid ${evaluationResult.failure}`);
         throw new AppError(503, 'AI service temporarily unavailable.', 'invalid_evaluator_output');
       }
+      const validated = evaluationResult.validated;
 
       db.appendEvent(sessionId, 'evaluation_completed', {});
       const completeTimeline = getPublicTimeline(db, sessionId);
@@ -204,4 +213,4 @@ function createReceiptRouter({ db, mission, ai, sessionLock }) {
   return router;
 }
 
-module.exports = { buildEvaluationMetadata, canonicalize, createReceiptRouter, EVALUATOR_CONTRACT_VERSION, fingerprintEvaluationInput, publicReceipt, validateEvaluation };
+module.exports = { buildEvaluationMetadata, canonicalize, createReceiptRouter, EVALUATOR_CONTRACT_VERSION, fingerprintEvaluationInput, inspectEvaluation, publicReceipt, validateEvaluation };

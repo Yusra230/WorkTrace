@@ -7,7 +7,7 @@ const { createApp } = require('../server');
 const { toEvaluationTimelineEvent, toPublicTimelineEvent } = require('../utils/timeline');
 const { isCauseQuestion } = require('../utils/validation');
 const { AppError } = require('../utils/errors');
-const { createAiService, receiptSchema } = require('../utils/gemini');
+const { createAiService, MAX_TEAMMATE_RESPONSE_WORDS, receiptSchema } = require('../utils/gemini');
 const { EVALUATOR_CONTRACT_VERSION, fingerprintEvaluationInput, publicReceipt, validateEvaluation } = require('../routes/receipt');
 
 function eventId(input, ...types) {
@@ -39,8 +39,12 @@ function createHarness() {
   const db = createDatabase(':memory:');
   let evaluatorInput;
   let evaluationCalls = 0;
+  const teammateCalls = [];
   const ai = {
-    teammate: async () => 'Inspect the available error signals before committing to a cause.',
+    teammate: async (...args) => {
+      teammateCalls.push(args);
+      return 'Inspect the available error signals before committing to a cause.';
+    },
     evaluate: async (input) => {
       evaluatorInput = input;
       evaluationCalls += 1;
@@ -48,7 +52,13 @@ function createHarness() {
     },
     getEvaluationMetadata: () => ({ model: 'test-evaluator', temperature: 0 })
   };
-  return { db, app: createApp({ db, ai }), getEvaluationCalls: () => evaluationCalls, getEvaluatorInput: () => evaluatorInput };
+  return {
+    db,
+    app: createApp({ db, ai }),
+    getEvaluationCalls: () => evaluationCalls,
+    getEvaluatorInput: () => evaluatorInput,
+    getTeammateCalls: () => teammateCalls
+  };
 }
 
 function createScenarioHarness(scenario) {
@@ -306,7 +316,6 @@ test('deliberately collected evidence is persisted through the generic event log
   t.after(() => db.close());
   const started = await request(app).post('/api/session/start').send({}).expect(201);
   const evidence = {
-    evidence_id: randomUUID(),
     title: 'Payment failure timing',
     description: 'Payment failures increased beginning July 14.',
     source: 'Mission signal',
@@ -323,13 +332,45 @@ test('deliberately collected evidence is persisted through the generic event log
   }).expect(201);
   const event = db.getEvents(started.body.session_id).find((item) => item.id === logged.body.event_id);
   const publicEvent = toPublicTimelineEvent(event);
+  const persistedEvidence = JSON.parse(event.data);
   const evaluationEvent = toEvaluationTimelineEvent(event);
-  const { linked_hypothesis_id, ...publicEvidence } = evidence;
+  const { linked_hypothesis_id, ...publicEvidence } = persistedEvidence;
 
   assert.equal(event.type, 'evidence_collected');
-  assert.deepEqual(JSON.parse(event.data), evidence);
+  assert.match(logged.body.evidence_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.deepEqual(persistedEvidence, { ...evidence, evidence_id: logged.body.evidence_id });
   assert.deepEqual(publicEvent.data, publicEvidence);
   assert.deepEqual(evaluationEvent.evidence_attribution, { actor: 'learner', category: 'learner_selected_evidence' });
+
+  await request(app).post('/api/event/log').send({
+    session_id: started.body.session_id,
+    type: 'evidence_collected',
+    data: { ...evidence, evidence_id: 'frontend-file-path' }
+  }).expect(400);
+});
+
+test('chat supplies Gemini with the complete grounded mission workspace, not only file names', async (t) => {
+  const { db, app, getTeammateCalls } = createHarness();
+  t.after(() => db.close());
+  const started = await request(app).post('/api/session/start').send({}).expect(201);
+
+  await request(app).post('/api/chat').send({
+    session_id: started.body.session_id,
+    message: 'Can you inspect the payment confirmation code?'
+  }).expect(200);
+
+  const [[history, message, context]] = getTeammateCalls();
+  assert.deepEqual(history, [{ role: 'learner', content: 'Can you inspect the payment confirmation code?' }]);
+  assert.equal(message, 'Can you inspect the payment confirmation code?');
+  assert.deepEqual(context.workspace_files.map((file) => file.path), [
+    'frontend/Checkout.js',
+    'frontend/Cart.js',
+    'backend/routes/checkout.js'
+  ]);
+  assert.match(context.workspace_files.find((file) => file.path === 'frontend/Checkout.js').content, /fetch\('\/api\/payment\/confirm'/);
+  assert.match(context.workspace_files.find((file) => file.path === 'frontend/Cart.js').content, /calculateCartTotal/);
+  assert.match(context.workspace_files.find((file) => file.path === 'backend/routes/checkout.js').content, /paymentProvider\.confirm\(req\.body\)/);
+  assert.equal(Object.hasOwn(context.mission, 'flawed_suggestion'), false);
 });
 
 test('complete flow returns an ordered sanitized receipt and evaluator timeline', async (t) => {
@@ -491,14 +532,27 @@ test('Gemini provider uses system instructions and structured evaluator output',
     }
   };
   const ai = createAiService({ client, model: 'gemini-test-model' });
-  const teammate = await ai.teammate([{ role: 'learner', content: 'What changed?' }], 'Where should I look?');
+  const groundedMissionContext = {
+    mission: { id: 'nova-commerce-checkout', context: 'Payment failures increased after July 14.' },
+    workspace_files: [
+      { path: 'frontend/Checkout.js', language: 'javascript', content: "fetch('/api/payment/confirm')" },
+      { path: 'frontend/Cart.js', language: 'javascript', content: 'calculateCartTotal(items)' },
+      { path: 'backend/routes/checkout.js', language: 'javascript', content: 'paymentProvider.confirm(req.body)' }
+    ]
+  };
+  const teammate = await ai.teammate([{ role: 'learner', content: 'What changed?' }], 'Where should I look?', groundedMissionContext);
   const evaluator = await ai.evaluate({ mission: {}, events: [] });
 
   assert.equal(teammate, 'Inspect the evidence first.');
   assert.deepEqual(evaluator, { scores: {}, evidence: [], narrative_summary: 'summary' });
   assert.equal(requests[0].model, 'gemini-test-model');
   assert.equal(typeof requests[0].config.systemInstruction, 'string');
+  assert.equal(requests[0].config.systemInstruction.includes('Do not invent files, logs, analytics, Git history'), true);
   assert.equal(requests[0].contents.includes('Current learner message:'), true);
+  assert.equal(requests[0].contents.includes('frontend/Checkout.js'), true);
+  assert.equal(requests[0].contents.includes("fetch('/api/payment/confirm')"), true);
+  assert.equal(requests[0].contents.includes('frontend/Cart.js'), true);
+  assert.equal(requests[0].contents.includes('backend/routes/checkout.js'), true);
   assert.equal(requests[1].config.responseMimeType, 'application/json');
   assert.deepEqual(requests[1].config.responseJsonSchema, receiptSchema);
   assert.equal(requests[1].config.temperature, 0);
@@ -506,4 +560,21 @@ test('Gemini provider uses system instructions and structured evaluator output',
   assert.equal(requests[1].config.systemInstruction.includes('AI-provided context'), true);
   assert.equal(requests[1].config.systemInstruction.includes('evidence-rubric-v1'), true);
   assert.deepEqual(ai.getEvaluationMetadata(), { model: 'gemini-test-model', temperature: 0 });
+});
+
+test('Gemini teammate responses are capped for ordinary investigation prompts but preserve explicit detail requests', async () => {
+  const longResponse = Array.from({ length: MAX_TEAMMATE_RESPONSE_WORDS + 25 }, (_, index) => `word${index + 1}`).join(' ');
+  const client = {
+    models: {
+      generateContent: async () => ({ text: longResponse })
+    }
+  };
+  const ai = createAiService({ client, model: 'gemini-test-model' });
+
+  const concise = await ai.teammate([], 'What should I inspect next?');
+  const detailed = await ai.teammate([], 'Please provide a detailed explanation of the available checkout code.');
+
+  assert.equal(concise.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS);
+  assert.equal(concise.endsWith('…'), true);
+  assert.equal(detailed.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS + 25);
 });

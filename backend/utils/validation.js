@@ -104,7 +104,7 @@ function validateEvent(body) {
   }
 
   if (type === 'evidence_collected') {
-    if (typeof data.evidence_id !== 'string' || !isUuid(data.evidence_id)) {
+    if (data.evidence_id !== undefined && (typeof data.evidence_id !== 'string' || !isUuid(data.evidence_id))) {
       throw new AppError(400, 'data.evidence_id must be a valid UUID.', 'validation_error');
     }
     if (!['supports', 'contradicts', 'neutral'].includes(data.relation)) {
@@ -121,7 +121,6 @@ function validateEvent(body) {
       sessionId,
       type,
       data: {
-        evidence_id: data.evidence_id,
         title: requireString(data.title, 'data.title', MAX.evidenceTitle),
         description: requireString(data.description, 'data.description', MAX.evidenceDescription),
         source: requireString(data.source, 'data.source', MAX.evidenceSource),

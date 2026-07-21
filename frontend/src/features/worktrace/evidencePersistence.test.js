@@ -16,7 +16,6 @@ import { persistEvidence } from './worktraceSlice';
 
 describe('persistEvidence', () => {
   const evidence = {
-    id: '9f8c3e6a-a938-4b6d-9a43-02521055ca9b',
     title: 'Payment failure timing',
     description: 'Payment failures increased beginning July 14.',
     source: 'Mission signal',
@@ -24,7 +23,6 @@ describe('persistEvidence', () => {
     relation: 'contradicts',
     linkedHypothesisId: '122f3d46-3282-4af5-8fc8-f8a5b20cf083',
     createdBy: 'learner',
-    persistenceStatus: 'pending'
   };
 
   beforeEach(() => {
@@ -32,12 +30,13 @@ describe('persistEvidence', () => {
   });
 
   it('uses the existing generic event log with the evidence_collected payload', async () => {
-    api.logEvent.mockResolvedValue({ success: true, event_id: 'event-123' });
+    const evidenceId = '9f8c3e6a-a938-4b6d-9a43-02521055ca9b';
+    api.logEvent.mockResolvedValue({ success: true, event_id: 'event-123', evidence_id: evidenceId });
     const dispatched = [];
 
     const result = await persistEvidence(evidence)(
       (action) => dispatched.push(action),
-      () => ({ worktrace: { sessionId: 'session-123', evidenceItems: [evidence] } }),
+      () => ({ worktrace: { sessionId: 'session-123', evidenceItems: [] } }),
       undefined
     );
 
@@ -45,7 +44,6 @@ describe('persistEvidence', () => {
       sessionId: 'session-123',
       type: 'evidence_collected',
       data: {
-        evidence_id: evidence.id,
         title: evidence.title,
         description: evidence.description,
         source: evidence.source,
@@ -56,6 +54,6 @@ describe('persistEvidence', () => {
       }
     });
     expect(result.type).toBe('worktrace/persistEvidence/fulfilled');
-    expect(dispatched.at(-1).payload).toEqual({ evidenceId: evidence.id, eventId: 'event-123' });
+    expect(dispatched.at(-1).payload).toEqual({ evidence: { ...evidence, id: evidenceId }, eventId: 'event-123' });
   });
 });

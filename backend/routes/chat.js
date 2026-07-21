@@ -11,7 +11,27 @@ function requireActiveSession(db, sessionId) {
   return session;
 }
 
-function createChatRouter({ db, mission, ai, sessionLock }) {
+function createGroundedMissionContext(mission, codebase) {
+  const availablePaths = new Set(mission.codebase_files || []);
+  const workspaceFiles = (codebase?.files || [])
+    .filter((file) => availablePaths.has(file.path))
+    .map(({ path, language, content }) => ({ path, language, content }));
+
+  return {
+    mission: {
+      id: mission.id,
+      company: mission.company,
+      role: mission.role,
+      title: mission.title,
+      brief: mission.brief,
+      context: mission.context,
+      seed_data: mission.seed_data
+    },
+    workspace_files: workspaceFiles
+  };
+}
+
+function createChatRouter({ db, mission, codebase, ai, sessionLock }) {
   const router = express.Router();
 
   router.post('/', asyncHandler(async (req, res) => {
@@ -27,7 +47,8 @@ function createChatRouter({ db, mission, ai, sessionLock }) {
       );
       const trigger = nextMessageCount === 5 ? 'fifth_message' : 'cause_question';
       const history = buildTeammateHistory(getPublicTimeline(db, sessionId));
-      const teammateReply = await ai.teammate(history, message);
+      const groundedMissionContext = createGroundedMissionContext(mission, codebase);
+      const teammateReply = await ai.teammate(history, message, groundedMissionContext);
 
       let aiResponse = teammateReply;
       let suggestionId = null;
@@ -59,4 +80,4 @@ function createChatRouter({ db, mission, ai, sessionLock }) {
   return router;
 }
 
-module.exports = { createChatRouter, requireActiveSession };
+module.exports = { createChatRouter, createGroundedMissionContext, requireActiveSession };

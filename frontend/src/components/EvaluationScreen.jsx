@@ -30,9 +30,9 @@ export default function EvaluationScreen({ error, onGenerate, onRetry, status })
           </>
         ) : (
           <>
-            <p className="mt-6 text-sm font-semibold uppercase tracking-[0.15em] text-violet-300">Competency evaluation</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">Reviewing your evidence trail</h1>
-            <p className="mt-4 leading-7 text-slate-300">WorkTrace is connecting your investigation, AI verification, and independent explanation to the competency assessment.</p>
+            <p className="mt-6 text-sm font-semibold uppercase tracking-[0.15em] text-violet-300">Follow-up complete</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">Independent explanation recorded</h1>
+            <p className="mt-4 leading-7 text-slate-300">WorkTrace is now evaluating your investigation, AI verification, and submitted explanation for the Competency Receipt.</p>
             <p aria-live="polite" className="mt-7 inline-flex items-center gap-2 text-sm text-slate-400"><LoaderCircle aria-hidden="true" size={17} className="animate-spin text-cyan-300" />Generating your Competency Receipt…</p>
           </>
         )}

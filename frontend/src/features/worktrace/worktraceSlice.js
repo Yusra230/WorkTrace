@@ -35,6 +35,9 @@ export const sendChat = createAsyncThunk(
     } catch (error) {
       return rejectWithValue(getApiErrorMessage(error));
     }
+  },
+  {
+    condition: (_, { getState }) => !getState().worktrace.loading.sendChat
   }
 );
 
@@ -112,9 +115,15 @@ export const submitFollowUp = createAsyncThunk(
     try {
       const response = await submitFollowUpRequest({ sessionId, answer: followUp.answer.trim() });
       if (!response.ready_for_evaluation) return rejectWithValue('Your explanation was saved, but evaluation is not ready yet.');
-      return response;
+      return { ...response, answer: followUp.answer.trim() };
     } catch (error) {
       return rejectWithValue(getApiErrorMessage(error));
+    }
+  },
+  {
+    condition: (_, { getState }) => {
+      const { followUp, loading } = getState().worktrace;
+      return !loading.submitFollowUp && !followUp.submittedAnswer && Boolean(followUp.answer.trim());
     }
   }
 );
@@ -163,30 +172,35 @@ export function isDuplicateEvidence(items, evidence) {
   ));
 }
 
+function isPersistedEvidenceId(value) {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export const persistEvidence = createAsyncThunk(
   'worktrace/persistEvidence',
   async (evidence, { getState, rejectWithValue }) => {
     const { evidenceItems, sessionId } = getState().worktrace;
-    const storedEvidence = evidenceItems.find((item) => item.id === evidence.id);
-    if (!sessionId || !storedEvidence) return rejectWithValue('Evidence could not be saved because the active mission is unavailable.');
-    if (storedEvidence.persistenceStatus === 'persisted') return rejectWithValue('This evidence has already been saved.');
+    if (!sessionId) return rejectWithValue('Evidence could not be saved because the active mission is unavailable.');
+    if (isDuplicateEvidence(evidenceItems, evidence)) return rejectWithValue('This evidence is already on the board.');
 
     try {
       const response = await logEventRequest({
         sessionId,
         type: 'evidence_collected',
         data: {
-          evidence_id: storedEvidence.id,
-          title: storedEvidence.title,
-          description: storedEvidence.description,
-          source: storedEvidence.source,
-          type: storedEvidence.type,
-          relation: storedEvidence.relation,
-          linked_hypothesis_id: storedEvidence.linkedHypothesisId,
-          created_by: storedEvidence.createdBy
+          title: evidence.title,
+          description: evidence.description,
+          source: evidence.source,
+          type: evidence.type,
+          relation: evidence.relation,
+          linked_hypothesis_id: evidence.linkedHypothesisId,
+          created_by: evidence.createdBy
         }
       });
-      return { evidenceId: storedEvidence.id, eventId: response.event_id };
+      if (!isPersistedEvidenceId(response.evidence_id)) {
+        return rejectWithValue('Evidence could not be saved because the server did not return a valid evidence ID.');
+      }
+      return { evidence: { ...evidence, id: response.evidence_id }, eventId: response.event_id };
     } catch (error) {
       return rejectWithValue(getApiErrorMessage(error));
     }
@@ -199,7 +213,6 @@ export const collectEvidence = (evidence) => (dispatch, getState) => {
     dispatch(setEvidenceError('This evidence is already on the board.'));
     return Promise.resolve({ duplicate: true });
   }
-  dispatch(addEvidence(evidence));
   return dispatch(persistEvidence(evidence));
 };
 
@@ -224,7 +237,8 @@ export const initialState = {
   },
   followUp: {
     question: '',
-    answer: ''
+    answer: '',
+    submittedAnswer: ''
   },
   evaluation: {
     status: 'idle',
@@ -237,6 +251,7 @@ export const initialState = {
   loading: {
     startSession: false,
     sendChat: false,
+    persistEvidence: false,
     logDecision: false,
     submitSolution: false,
     submitFollowUp: false,
@@ -268,7 +283,14 @@ const worktraceSlice = createSlice({
       state.suggestionDecision = snapshot.suggestionDecision || null;
       state.verification = snapshot.verification || initialState.verification;
       state.submission = snapshot.submission || initialState.submission;
-      state.followUp = snapshot.followUp || initialState.followUp;
+      const restoredFollowUp = snapshot.followUp || initialState.followUp;
+      const hadCompletedFollowUp = ['ready', 'generating', 'completed'].includes(snapshot.evaluation?.status)
+        || snapshot.currentView === applicationViews.EVALUATING;
+      state.followUp = {
+        question: restoredFollowUp.question || '',
+        answer: restoredFollowUp.answer || '',
+        submittedAnswer: restoredFollowUp.submittedAnswer || (hadCompletedFollowUp ? restoredFollowUp.answer || '' : '')
+      };
       state.evaluation = snapshot.evaluation || initialState.evaluation;
       state.competencyReceipt = null;
       state.receiptRestoration.status = 'not-found';
@@ -348,19 +370,28 @@ const worktraceSlice = createSlice({
         state.recoverableError = action.payload || 'Unable to start a mission.';
         state.errorScope = 'session';
       })
-      .addCase(sendChat.pending, (state) => {
+      .addCase(sendChat.pending, (state, action) => {
         state.loading.sendChat = true;
         state.recoverableError = null;
         state.errorScope = null;
+        state.chatTranscript.push({
+          id: `learner-${action.meta.requestId}`,
+          requestId: action.meta.requestId,
+          role: 'learner',
+          content: action.meta.arg,
+          status: 'pending'
+        });
       })
       .addCase(sendChat.fulfilled, (state, action) => {
         const { message, response } = action.payload;
-        const messageNumber = state.chatTranscript.length + 1;
         state.loading.sendChat = false;
-        state.chatTranscript.push(
-          { id: `learner-${messageNumber}`, role: 'learner', content: message },
-          { id: `teammate-${messageNumber + 1}`, role: 'teammate', content: response.ai_response }
-        );
+        const pendingMessage = state.chatTranscript.find((item) => item.requestId === action.meta.requestId);
+        if (pendingMessage) {
+          pendingMessage.status = 'sent';
+        } else {
+          state.chatTranscript.push({ id: `learner-${action.meta.requestId}`, role: 'learner', content: message, status: 'sent' });
+        }
+        state.chatTranscript.push({ id: `teammate-${action.meta.requestId}`, role: 'teammate', content: response.ai_response, status: 'sent' });
         if (response.suggestion_offered && response.suggestion_id) {
           state.offeredSuggestion = { message: response.ai_response };
           state.suggestionId = response.suggestion_id;
@@ -368,6 +399,8 @@ const worktraceSlice = createSlice({
       })
       .addCase(sendChat.rejected, (state, action) => {
         state.loading.sendChat = false;
+        const pendingMessage = state.chatTranscript.find((item) => item.requestId === action.meta.requestId);
+        if (pendingMessage) pendingMessage.status = 'failed';
         state.recoverableError = action.payload || 'Unable to reach your AI teammate.';
         state.errorScope = 'chat';
       })
@@ -407,7 +440,7 @@ const worktraceSlice = createSlice({
       })
       .addCase(submitSolution.fulfilled, (state, action) => {
         state.loading.submitSolution = false;
-        state.followUp.question = action.payload.follow_up_question;
+        state.followUp = { question: action.payload.follow_up_question, answer: '', submittedAnswer: '' };
         state.currentView = applicationViews.FOLLOW_UP;
       })
       .addCase(submitSolution.rejected, (state, action) => {
@@ -420,8 +453,10 @@ const worktraceSlice = createSlice({
         state.recoverableError = null;
         state.errorScope = null;
       })
-      .addCase(submitFollowUp.fulfilled, (state) => {
+      .addCase(submitFollowUp.fulfilled, (state, action) => {
         state.loading.submitFollowUp = false;
+        state.followUp.submittedAnswer = action.payload.answer || state.followUp.answer.trim();
+        state.followUp.answer = '';
         state.evaluation.status = 'ready';
         state.currentView = applicationViews.EVALUATING;
       })
@@ -465,21 +500,23 @@ const worktraceSlice = createSlice({
         state.errorScope = 'receipt';
       })
       .addCase(persistEvidence.pending, (state, action) => {
-        const evidence = state.evidenceItems.find((item) => item.id === action.meta.arg.id);
-        if (evidence) evidence.persistenceStatus = 'pending';
+        state.loading.persistEvidence = true;
         state.evidenceError = null;
       })
       .addCase(persistEvidence.fulfilled, (state, action) => {
-        const evidence = state.evidenceItems.find((item) => item.id === action.payload.evidenceId);
-        if (evidence) {
-          evidence.persistenceStatus = 'persisted';
-          evidence.eventId = action.payload.eventId;
+        state.loading.persistEvidence = false;
+        const evidence = {
+          ...action.payload.evidence,
+          persistenceStatus: 'persisted',
+          eventId: action.payload.eventId
+        };
+        if (!isDuplicateEvidence(state.evidenceItems, evidence)) {
+          state.evidenceItems.push(evidence);
         }
         state.evidenceError = null;
       })
       .addCase(persistEvidence.rejected, (state, action) => {
-        const evidence = state.evidenceItems.find((item) => item.id === action.meta.arg.id);
-        if (evidence) evidence.persistenceStatus = 'failed';
+        state.loading.persistEvidence = false;
         state.evidenceError = action.payload || 'Unable to save evidence to the mission timeline.';
         state.recoverableError = state.evidenceError;
         state.errorScope = 'evidence';

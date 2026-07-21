@@ -6,6 +6,18 @@ const { retryAI } = require('./retry');
 const { redactSensitiveText } = require('./safety');
 
 const EVALUATOR_TEMPERATURE = 0;
+const MAX_TEAMMATE_RESPONSE_WORDS = 200;
+
+function requestsDetail(message) {
+  return /\b(detail(?:ed)?|in[-\s]?depth|thorough(?:ly)?|comprehensive(?:ly)?|step[-\s]?by[-\s]?step)\b/i.test(message || '');
+}
+
+function constrainTeammateResponse(text, message) {
+  if (requestsDetail(message)) return text;
+  const words = text.match(/\S+/g) || [];
+  if (words.length <= MAX_TEAMMATE_RESPONSE_WORDS) return text;
+  return `${words.slice(0, MAX_TEAMMATE_RESPONSE_WORDS).join(' ')}…`;
+}
 
 const receiptSchema = {
   type: 'object',
@@ -46,19 +58,59 @@ const receiptSchema = {
 
 function safeParseJson(text) {
   if (typeof text !== 'string') return null;
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const trimmed = text.trim();
   try {
     return JSON.parse(trimmed);
   } catch {
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start < 0 || end <= start) return null;
-    try {
-      return JSON.parse(trimmed.slice(start, end + 1));
-    } catch {
-      return null;
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fenced) {
+      try {
+        return JSON.parse(fenced[1]);
+      } catch {
+        return null;
+      }
     }
+    const start = trimmed.indexOf('{');
+    if (start < 0) return null;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < trimmed.length; index += 1) {
+      const character = trimmed[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === '"') inString = false;
+      } else if (character === '"') {
+        inString = true;
+      } else if (character === '{') {
+        depth += 1;
+      } else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(trimmed.slice(start, index + 1));
+          } catch {
+            return null;
+          }
+        }
+      }
+    }
+    return null;
   }
+}
+
+function learnerEventIds(events, categories) {
+  return (Array.isArray(events) ? events : [])
+    .filter((event) => event?.evidence_attribution?.actor === 'learner' && categories.includes(event.evidence_attribution.category))
+    .map((event) => event.event_id)
+    .filter((eventId) => typeof eventId === 'string');
+}
+
+function evaluatorEventIdInstruction(evaluationInput) {
+  const events = evaluationInput?.events;
+  const ids = (categories) => JSON.stringify(learnerEventIds(events, categories));
+  return `\n\nUse only exact event_id values from this evaluation input. Required learner-owned anchors by dimension:\n- technical_execution: one final_solution ID from ${ids(['final_solution'])}\n- problem_framing: one investigation_question_or_reasoning or learner_selected_evidence ID from ${ids(['investigation_question_or_reasoning', 'learner_selected_evidence'])}\n- ai_verification: one decision or verification ID from ${ids(['decision', 'verification'])}\n- independent_judgment: BOTH one decision ID from ${ids(['decision'])} AND one independent_explanation ID from ${ids(['independent_explanation'])}\n- communication: one final_solution or independent_explanation ID from ${ids(['final_solution', 'independent_explanation'])}`;
 }
 
 function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2.5-flash' } = {}) {
@@ -77,14 +129,14 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
     getEvaluationMetadata() {
       return { model, temperature: EVALUATOR_TEMPERATURE };
     },
-    async teammate(history, message) {
+    async teammate(history, message, groundedMissionContext = {}) {
       const transcript = history.map((item) => `${item.role}: ${item.content}`).join('\n');
       const response = await generateContent({
         model,
-        contents: `Visible conversation so far:\n${transcript || '(none)'}\n\nCurrent learner message:\n${message}`,
+        contents: `Grounded mission context (the complete available workspace and mission signals):\n${JSON.stringify(groundedMissionContext)}\n\nVisible conversation so far:\n${transcript || '(none)'}\n\nCurrent learner message:\n${message}`,
         config: { systemInstruction: teammatePrompt }
       });
-      const text = typeof response.text === 'string' ? response.text.trim() : '';
+      const text = typeof response.text === 'string' ? constrainTeammateResponse(response.text.trim(), message) : '';
       if (!text) throw new AppError(503, 'AI service temporarily unavailable.', 'ai_empty_response');
       return redactSensitiveText(text);
     },
@@ -96,7 +148,7 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
         model,
         contents: JSON.stringify(evidence),
         config: {
-          systemInstruction: `${evaluatorPrompt}${correctionInstruction}`,
+          systemInstruction: `${evaluatorPrompt}${evaluatorEventIdInstruction(evidence)}${correctionInstruction}`,
           temperature: EVALUATOR_TEMPERATURE,
           responseMimeType: 'application/json',
           responseJsonSchema: receiptSchema
@@ -107,4 +159,4 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
   };
 }
 
-module.exports = { createAiService, receiptSchema, safeParseJson, EVALUATOR_TEMPERATURE };
+module.exports = { createAiService, evaluatorEventIdInstruction, receiptSchema, safeParseJson, EVALUATOR_TEMPERATURE, MAX_TEAMMATE_RESPONSE_WORDS, constrainTeammateResponse };

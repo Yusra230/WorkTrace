@@ -1,0 +1,19 @@
+{
+  "files": [
+    {
+      "path": "frontend/Checkout.js",
+      "language": "javascript",
+      "content": "export async function submitPayment(paymentDetails) {\n  const response = await fetch('/api/payment/confirm', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify(paymentDetails)\n  });\n\n  if (!response.ok) {\n    throw new Error('Payment could not be confirmed.');\n  }\n\n  return response.json();\n}"
+    },
+    {
+      "path": "frontend/Cart.js",
+      "language": "javascript",
+      "content": "export function calculateCartTotal(items) {\n  return items.reduce((total, item) => total + item.price * item.quantity, 0);\n}"
+    },
+    {
+      "path": "backend/routes/checkout.js",
+      "language": "javascript",
+      "content": "router.post('/payment/confirm', async (req, res) => {\n  const result = await paymentProvider.confirm(req.body);\n  res.status(200).json(result);\n});"
+    }
+  ]
+}

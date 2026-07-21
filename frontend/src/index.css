@@ -23,6 +23,58 @@ body {
   width: 100%;
 }
 
+.worktrace-internal-app {
+  --worktrace-scroll-track: #131315;
+  --worktrace-scroll-thumb: #d7ff3fb3;
+  --worktrace-scroll-thumb-hover: #d7ff3f;
+  scrollbar-color: var(--worktrace-scroll-thumb) var(--worktrace-scroll-track);
+  scrollbar-width: thin;
+}
+
+.worktrace-internal-scroll,
+.worktrace-conversation-scroll,
+.worktrace-code-pane {
+  scrollbar-color: var(--worktrace-scroll-thumb) var(--worktrace-scroll-track);
+  scrollbar-width: thin;
+}
+
+.worktrace-internal-scroll::-webkit-scrollbar,
+.worktrace-conversation-scroll::-webkit-scrollbar,
+.worktrace-code-pane::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.worktrace-internal-scroll::-webkit-scrollbar-track,
+.worktrace-conversation-scroll::-webkit-scrollbar-track,
+.worktrace-code-pane::-webkit-scrollbar-track {
+  background: var(--worktrace-scroll-track);
+}
+
+.worktrace-internal-scroll::-webkit-scrollbar-thumb,
+.worktrace-conversation-scroll::-webkit-scrollbar-thumb,
+.worktrace-code-pane::-webkit-scrollbar-thumb {
+  background: var(--worktrace-scroll-thumb);
+  border: 2px solid var(--worktrace-scroll-track);
+  border-radius: 999px;
+}
+
+.worktrace-internal-scroll::-webkit-scrollbar-thumb:hover,
+.worktrace-conversation-scroll::-webkit-scrollbar-thumb:hover,
+.worktrace-code-pane::-webkit-scrollbar-thumb:hover {
+  background: var(--worktrace-scroll-thumb-hover);
+}
+
+.worktrace-code-editor .monaco-scrollable-element > .scrollbar.vertical .slider,
+.worktrace-code-editor .monaco-scrollable-element > .scrollbar.horizontal .slider {
+  background: var(--worktrace-scroll-thumb) !important;
+}
+
+.worktrace-code-editor .monaco-scrollable-element > .scrollbar.vertical .slider:hover,
+.worktrace-code-editor .monaco-scrollable-element > .scrollbar.horizontal .slider:hover {
+  background: var(--worktrace-scroll-thumb-hover) !important;
+}
+
 button,
 input,
 textarea {
