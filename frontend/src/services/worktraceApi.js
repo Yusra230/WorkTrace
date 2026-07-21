@@ -5,6 +5,11 @@ export async function startSession() {
   return response.data;
 }
 
+export async function getMissionPreview() {
+  const response = await apiClient.get('/session/mission');
+  return response.data.mission;
+}
+
 export async function sendChat({ sessionId, message }) {
   const response = await apiClient.post('/chat', {
     session_id: sessionId,

@@ -9,6 +9,10 @@ function publicMission(mission) {
 
 function createSessionRouter({ db, mission }) {
   const router = express.Router();
+  router.get('/mission', (req, res) => {
+    res.json({ mission: publicMission(mission) });
+  });
+
   router.post('/start', asyncHandler(async (req, res) => {
     if (req.body && (typeof req.body !== 'object' || Array.isArray(req.body))) {
       throw new AppError(400, 'Request body must be a JSON object.', 'validation_error');

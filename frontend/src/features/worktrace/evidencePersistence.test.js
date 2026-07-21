@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
+  getMissionPreview: vi.fn(),
   logEvent: vi.fn(),
   startSession: vi.fn(),
   sendChat: vi.fn(),

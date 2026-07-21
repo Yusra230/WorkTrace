@@ -1,16 +1,33 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { getApiErrorMessage } from '../../services/apiClient';
 import { saveCompletedSessionId } from '../../services/receiptStorage';
-import { generateReceipt as generateReceiptRequest, getReceipt as getReceiptRequest, logEvent as logEventRequest, sendChat as sendChatRequest, startSession as startSessionRequest, submitFollowUp as submitFollowUpRequest, submitSolution as submitSolutionRequest } from '../../services/worktraceApi';
+import { generateReceipt as generateReceiptRequest, getMissionPreview as getMissionPreviewRequest, getReceipt as getReceiptRequest, logEvent as logEventRequest, sendChat as sendChatRequest, startSession as startSessionRequest, submitFollowUp as submitFollowUpRequest, submitSolution as submitSolutionRequest } from '../../services/worktraceApi';
 
 export const applicationViews = Object.freeze({
-  ONBOARDING: 'onboarding',
+  MISSION_ENTRY: 'mission-entry',
   WORKSPACE: 'workspace',
   SUBMISSION: 'submission',
   FOLLOW_UP: 'follow-up',
   EVALUATING: 'evaluating',
   RECEIPT: 'receipt'
 });
+
+export const loadMissionPreview = createAsyncThunk(
+  'worktrace/loadMissionPreview',
+  async (_, { rejectWithValue }) => {
+    try {
+      return await getMissionPreviewRequest();
+    } catch (error) {
+      return rejectWithValue(getApiErrorMessage(error));
+    }
+  },
+  {
+    condition: (_, { getState }) => {
+      const { missionPreview, sessionId } = getState().worktrace;
+      return !sessionId && missionPreview.status !== 'loading' && missionPreview.status !== 'loaded';
+    }
+  }
+);
 
 export const startSession = createAsyncThunk(
   'worktrace/startSession',
@@ -19,6 +36,12 @@ export const startSession = createAsyncThunk(
       return await startSessionRequest();
     } catch (error) {
       return rejectWithValue(getApiErrorMessage(error));
+    }
+  },
+  {
+    condition: (_, { getState }) => {
+      const { loading, sessionId } = getState().worktrace;
+      return !loading.startSession && !sessionId;
     }
   }
 );
@@ -141,6 +164,12 @@ export const generateReceipt = createAsyncThunk(
     } catch (error) {
       return rejectWithValue(getApiErrorMessage(error));
     }
+  },
+  {
+    condition: (_, { getState }) => {
+      const { evaluation, loading, competencyReceipt } = getState().worktrace;
+      return evaluation.status === 'ready' && !loading.generateReceipt && !competencyReceipt;
+    }
   }
 );
 
@@ -219,7 +248,8 @@ export const collectEvidence = (evidence) => (dispatch, getState) => {
 export const initialState = {
   sessionId: null,
   mission: null,
-  currentView: applicationViews.ONBOARDING,
+  missionPreview: { status: 'idle', error: null },
+  currentView: applicationViews.MISSION_ENTRY,
   selectedFilePath: 'frontend/Checkout.js',
   chatTranscript: [],
   evidenceItems: [],
@@ -274,6 +304,7 @@ const worktraceSlice = createSlice({
       const snapshot = action.payload;
       state.sessionId = snapshot.sessionId;
       state.mission = snapshot.mission;
+      state.missionPreview = { status: 'loaded', error: null };
       state.currentView = snapshot.currentView;
       state.selectedFilePath = snapshot.selectedFilePath || initialState.selectedFilePath;
       state.chatTranscript = snapshot.chatTranscript || [];
@@ -348,12 +379,25 @@ const worktraceSlice = createSlice({
       state.recoverableError = null;
       state.errorScope = null;
     },
+    viewCompetencyReceipt(state) {
+      if (state.competencyReceipt) state.currentView = applicationViews.RECEIPT;
+    },
     resetWorktrace() {
       return initialState;
     }
   },
   extraReducers: (builder) => {
     builder
+      .addCase(loadMissionPreview.pending, (state) => {
+        state.missionPreview = { status: 'loading', error: null };
+      })
+      .addCase(loadMissionPreview.fulfilled, (state, action) => {
+        state.mission = action.payload;
+        state.missionPreview = { status: 'loaded', error: null };
+      })
+      .addCase(loadMissionPreview.rejected, (state, action) => {
+        state.missionPreview = { status: 'error', error: action.payload || 'Unable to load the mission.' };
+      })
       .addCase(startSession.pending, (state) => {
         state.loading.startSession = true;
         state.recoverableError = null;
@@ -363,6 +407,7 @@ const worktraceSlice = createSlice({
         state.loading.startSession = false;
         state.sessionId = action.payload.session_id;
         state.mission = action.payload.mission;
+        state.missionPreview = { status: 'loaded', error: null };
         state.currentView = applicationViews.WORKSPACE;
       })
       .addCase(startSession.rejected, (state, action) => {
@@ -476,7 +521,6 @@ const worktraceSlice = createSlice({
         state.loading.generateReceipt = false;
         state.evaluation.status = 'completed';
         state.competencyReceipt = action.payload;
-        state.currentView = applicationViews.RECEIPT;
       })
       .addCase(generateReceipt.rejected, (state, action) => {
         state.loading.generateReceipt = false;
@@ -524,5 +568,5 @@ const worktraceSlice = createSlice({
   }
 });
 
-export const { addEvidence, clearEvidenceError, clearRecoverableError, hydrateActiveSession, markReceiptRestorationChecked, resetWorktrace, retryReceiptGeneration, setCurrentView, setEvidenceError, setFollowUpAnswer, setSelectedFilePath, setSubmissionField, setVerificationRationale } = worktraceSlice.actions;
+export const { addEvidence, clearEvidenceError, clearRecoverableError, hydrateActiveSession, markReceiptRestorationChecked, resetWorktrace, retryReceiptGeneration, setCurrentView, setEvidenceError, setFollowUpAnswer, setSelectedFilePath, setSubmissionField, setVerificationRationale, viewCompetencyReceipt } = worktraceSlice.actions;
 export default worktraceSlice.reducer;

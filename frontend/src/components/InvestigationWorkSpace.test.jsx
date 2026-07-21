@@ -19,6 +19,7 @@ vi.mock('@monaco-editor/react', () => ({
 
 vi.mock('../services/worktraceApi', () => ({
   generateReceipt: vi.fn(),
+  getMissionPreview: vi.fn(),
   getReceipt: vi.fn(),
   logEvent: vi.fn(() => Promise.resolve({ event_id: 'event-1', evidence_id: persistedEvidenceId })),
   sendChat: vi.fn(() => Promise.resolve({ ai_response: 'Inspect the retry path before deciding.' })),

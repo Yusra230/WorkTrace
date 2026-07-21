@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import AppShell from './components/AppShell';
-import OnboardingScreen from './components/OnboardingScreen';
-import EvaluationScreen from './components/EvaluationScreen';
-import ReceiptScreen from './components/ReceiptScreen';
+import CompetencyReceipt from './components/CompetencyReceipt';
+import EvaluationTransition from './components/EvaluationTransition';
 import InvestigationWorkspace from './components/InvestigationWorkSpace';
+import MissionEntry from './components/MissionEntry';
 import Home from './components/Home';
-import { applicationViews, generateReceipt, hydrateActiveSession, markReceiptRestorationChecked, restoreReceipt, retryReceiptGeneration, startSession } from './features/worktrace/worktraceSlice';
+import { applicationViews, generateReceipt, hydrateActiveSession, loadMissionPreview, markReceiptRestorationChecked, restoreReceipt, retryReceiptGeneration, startSession, viewCompetencyReceipt } from './features/worktrace/worktraceSlice';
 import { clearActiveSession, getActiveSessionSnapshot, isRestorableActiveSession, saveActiveSession } from './services/activeSessionStorage';
 import { getCompletedSessionId } from './services/receiptStorage';
 import { resolveAppEntry } from './utils/appEntry';
@@ -20,16 +19,6 @@ function navigateToInvestigation() {
   if (typeof window !== 'undefined' && window.location.hash !== '#/investigate') window.location.hash = '#/investigate';
 }
 
-function PublicHome({ onStart }) {
-  const handleClick = (event) => {
-    const button = event.target instanceof Element ? event.target.closest('button') : null;
-    const label = button?.textContent?.trim();
-    if (label === 'See an Investigation' || label === 'Request Access') onStart();
-  };
-
-  return <div onClickCapture={handleClick}><Home /></div>;
-}
-
 export default function App() {
   const dispatch = useDispatch();
   const [route, setRoute] = useState(getRoute);
@@ -38,7 +27,7 @@ export default function App() {
   const [restoredActiveSession, setRestoredActiveSession] = useState(false);
   const [restoredReceipt, setRestoredReceipt] = useState(false);
   const worktrace = useSelector((state) => state.worktrace);
-  const { competencyReceipt, currentView, errorScope, evaluation, loading, mission, receiptRestoration, recoverableError } = worktrace;
+  const { competencyReceipt, currentView, errorScope, evaluation, loading, mission, missionPreview, receiptRestoration, recoverableError } = worktrace;
 
   useEffect(() => {
     const updateRoute = () => setRoute(getRoute());
@@ -97,8 +86,13 @@ export default function App() {
   }, [restoredActiveSession, restoredReceipt, route]);
 
   useEffect(() => {
+    if (!restorationResolved || route !== 'investigate' || worktrace.sessionId || competencyReceipt) return;
+    dispatch(loadMissionPreview());
+  }, [competencyReceipt, dispatch, restorationResolved, route, worktrace.sessionId]);
+
+  useEffect(() => {
     if (!restorationResolved) return;
-    if (currentView === applicationViews.RECEIPT || (!worktrace.sessionId && !loading.startSession)) {
+    if (competencyReceipt || currentView === applicationViews.RECEIPT || (!worktrace.sessionId && !loading.startSession)) {
       clearActiveSession();
     } else if (isRestorableActiveSession(worktrace)) {
       saveActiveSession(worktrace);
@@ -107,30 +101,35 @@ export default function App() {
 
   const startFromLanding = () => {
     navigateToInvestigation();
-    dispatch(startSession());
   };
 
   return (
     <>
-      {showLanding && <PublicHome onStart={startFromLanding} />}
+      {showLanding && <Home onStart={startFromLanding} />}
       {entry.surface === 'product' && isInvestigationWorkspace && (
         <main className="worktrace-internal-app">
           <InvestigationWorkspace />
         </main>
       )}
-      {entry.surface === 'product' && !isInvestigationWorkspace && (
-        <AppShell variant={currentView === applicationViews.ONBOARDING ? 'onboarding' : 'default'}>
-          {currentView === applicationViews.ONBOARDING && (
-            <OnboardingScreen
-              error={recoverableError}
-              isStarting={loading.startSession}
-              onStart={() => dispatch(startSession())}
-            />
-          )}
-          {currentView === applicationViews.EVALUATING && <EvaluationScreen error={errorScope === 'receipt' ? recoverableError : null} onGenerate={() => dispatch(generateReceipt())} onRetry={() => dispatch(retryReceiptGeneration())} status={evaluation.status} />}
-          {currentView === applicationViews.RECEIPT && <ReceiptScreen mission={mission} receipt={competencyReceipt} />}
-        </AppShell>
+      {entry.surface === 'product' && currentView === applicationViews.MISSION_ENTRY && (
+        <MissionEntry
+          error={missionPreview.error || (errorScope === 'session' ? recoverableError : null)}
+          isLoading={missionPreview.status === 'loading' || loading.startSession}
+          mission={mission}
+          onRetry={() => dispatch(errorScope === 'session' ? startSession() : loadMissionPreview())}
+          onStart={() => dispatch(startSession())}
+        />
       )}
+      {entry.surface === 'product' && currentView === applicationViews.EVALUATING && (
+        <EvaluationTransition
+          error={errorScope === 'receipt' ? recoverableError : null}
+          onGenerate={() => dispatch(generateReceipt())}
+          onRetry={() => dispatch(retryReceiptGeneration())}
+          onViewReceipt={() => dispatch(viewCompetencyReceipt())}
+          status={evaluation.status}
+        />
+      )}
+      {entry.surface === 'product' && currentView === applicationViews.RECEIPT && <CompetencyReceipt mission={mission} receipt={competencyReceipt} />}
     </>
   );
 }

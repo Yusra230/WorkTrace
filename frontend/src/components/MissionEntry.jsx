@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Fingerprint,
@@ -28,12 +28,6 @@ import {
 const FONT_IMPORT = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
 `;
-
-const missionFiles = [
-  { path: "frontend/Checkout.js", type: "frontend" },
-  { path: "frontend/Cart.js", type: "frontend" },
-  { path: "backend/checkout.js", type: "backend" },
-];
 
 const expectations = [
   {
@@ -81,13 +75,16 @@ function SectionLabel({ children }) {
   );
 }
 
-export default function MissionEntry() {
+export default function MissionEntry({ error, isLoading, mission, onRetry, onStart }) {
   const [acknowledged, setAcknowledged] = useState(false);
-  const [starting, setStarting] = useState(false);
+  const missionFiles = useMemo(() => (mission?.codebase_files || []).map((path) => ({
+    path,
+    type: path.startsWith("backend/") ? "backend" : "frontend",
+  })), [mission]);
 
   const handleStart = () => {
-    if (!acknowledged) return;
-    setStarting(true);
+    if (!acknowledged || isLoading || !mission) return;
+    onStart();
   };
 
   return (
@@ -139,11 +136,11 @@ export default function MissionEntry() {
         >
           <span className="flex items-center gap-2 px-3 py-1 rounded-full border border-[#232326] text-xs text-[#8C8C92]">
             <Building2 size={12} className="text-[#D7FF3F]" />
-            NovaCommerce
+            {mission?.company || "Loading mission"}
           </span>
           <span className="flex items-center gap-2 px-3 py-1 rounded-full border border-[#232326] text-xs text-[#8C8C92]">
             <UserCheck size={12} className="text-[#D7FF3F]" />
-            Role: Junior Product Engineer
+            Role: {mission?.role || "—"}
           </span>
         </motion.div>
 
@@ -155,8 +152,7 @@ export default function MissionEntry() {
           className="text-4xl sm:text-5xl md:text-6xl leading-[1.05] font-semibold tracking-tight max-w-3xl"
           style={{ fontFamily: "'Space Grotesk', sans-serif" }}
         >
-          Checkout conversion has{" "}
-          <span className="text-[#FF6A57]">dropped by 12%.</span>
+          {mission?.title || "Preparing your investigation"}
         </motion.h1>
 
         <motion.p
@@ -166,9 +162,9 @@ export default function MissionEntry() {
           variants={fadeUp}
           className="mt-6 text-base md:text-lg text-[#8C8C92] max-w-2xl"
         >
-          Investigate the problem and determine what is happening. You'll work
+          {mission?.brief || <>Investigate the problem and determine what is happening. You'll work
           alongside an AI teammate — but the investigation, decisions, and
-          final solution are yours to own.
+          final solution are yours to own.</>}
         </motion.p>
 
         {/* METRIC STRIP */}
@@ -187,15 +183,15 @@ export default function MissionEntry() {
               className="text-2xl font-semibold"
               style={{ fontFamily: "'Space Grotesk', sans-serif" }}
             >
-              -12%
+              {mission?.seed_data || "Mission signal"}
             </div>
             <div className="text-xs text-[#8C8C92]">
-              Checkout conversion, current period
+              {mission?.context || "Investigation context"}
             </div>
           </div>
           <div className="ml-auto flex items-center gap-1 text-xs text-[#8C8C92]">
             <AlertTriangle size={13} className="text-[#D7FF3F]" />
-            Signal flagged
+            {mission ? "Signal flagged" : "Loading"}
           </div>
         </motion.div>
 
@@ -359,9 +355,16 @@ export default function MissionEntry() {
             </span>
           </label>
 
+          {error && (
+            <div role="alert" className="max-w-xl text-sm text-[#FF6A57]">
+              {error}{" "}
+              <button type="button" onClick={onRetry} className="underline underline-offset-4 hover:text-[#EDEDEE]">Retry</button>
+            </div>
+          )}
+
           <button
             onClick={handleStart}
-            disabled={!acknowledged}
+            disabled={!acknowledged || isLoading || !mission}
             className={`group flex items-center gap-2 px-7 py-3.5 rounded-md font-medium transition-all ${
               acknowledged
                 ? "bg-[#D7FF3F] text-black hover:bg-white"
@@ -369,7 +372,7 @@ export default function MissionEntry() {
             }`}
           >
             <Play size={16} />
-            Start Investigation
+            {isLoading ? "Starting Investigation…" : "Start Investigation"}
             <ArrowRight
               size={16}
               className={acknowledged ? "group-hover:translate-x-1 transition-transform" : ""}
@@ -386,7 +389,7 @@ export default function MissionEntry() {
 
       {/* STARTING TRANSITION OVERLAY */}
       <AnimatePresence>
-        {starting && (
+        {isLoading && mission && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

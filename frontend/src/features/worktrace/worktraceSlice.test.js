@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import reducer, { addEvidence, applicationViews, collectEvidence, generateReceipt, hydrateActiveSession, initialState, persistEvidence, recordSuggestionDecision, restoreReceipt, sendChat, setFollowUpAnswer, startSession, submitFollowUp, submitSolution, verifySuggestionDecision } from './worktraceSlice';
+import reducer, { addEvidence, applicationViews, collectEvidence, generateReceipt, hydrateActiveSession, initialState, loadMissionPreview, persistEvidence, recordSuggestionDecision, restoreReceipt, sendChat, setFollowUpAnswer, startSession, submitFollowUp, submitSolution, verifySuggestionDecision, viewCompetencyReceipt } from './worktraceSlice';
 
 describe('worktraceSlice', () => {
   it('stores the session and enters the workspace after session start succeeds', () => {
@@ -10,6 +10,17 @@ describe('worktraceSlice', () => {
     expect(nextState.mission).toEqual(mission);
     expect(nextState.currentView).toBe(applicationViews.WORKSPACE);
     expect(nextState.loading.startSession).toBe(false);
+  });
+
+  it('loads the read-only mission preview before a session exists', () => {
+    const pendingState = reducer(initialState, loadMissionPreview.pending('preview-1'));
+    const mission = { id: 'nova-commerce-checkout', title: 'Checkout Conversion Drop' };
+    const loadedState = reducer(pendingState, loadMissionPreview.fulfilled(mission, 'preview-1'));
+
+    expect(loadedState.sessionId).toBeNull();
+    expect(loadedState.mission).toEqual(mission);
+    expect(loadedState.missionPreview).toEqual({ status: 'loaded', error: null });
+    expect(loadedState.currentView).toBe(applicationViews.MISSION_ENTRY);
   });
 
   it('hydrates a restorable active session without restoring transient state', () => {
@@ -123,14 +134,15 @@ describe('worktraceSlice', () => {
   });
 
   it('tracks receipt generation loading and moves to the final receipt on success', () => {
-    const generatingState = reducer({ ...initialState, sessionId: 'session-123', evaluation: { status: 'ready', attempts: 0 } }, generateReceipt.pending('request-7'));
+    const generatingState = reducer({ ...initialState, sessionId: 'session-123', currentView: applicationViews.EVALUATING, evaluation: { status: 'ready', attempts: 0 } }, generateReceipt.pending('request-7'));
     const receipt = { session_id: 'session-123', scores: { communication: 82 }, evidence: [], event_timeline: [] };
     const completedState = reducer(generatingState, generateReceipt.fulfilled(receipt, 'request-7'));
 
     expect(generatingState.loading.generateReceipt).toBe(true);
     expect(generatingState.evaluation.status).toBe('generating');
-    expect(completedState.currentView).toBe(applicationViews.RECEIPT);
+    expect(completedState.currentView).toBe(applicationViews.EVALUATING);
     expect(completedState.competencyReceipt).toEqual(receipt);
+    expect(reducer(completedState, viewCompetencyReceipt()).currentView).toBe(applicationViews.RECEIPT);
   });
 
   it('keeps completed evidence and exposes a controlled receipt-generation failure', () => {

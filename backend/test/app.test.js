@@ -7,8 +7,8 @@ const { createApp } = require('../server');
 const { toEvaluationTimelineEvent, toPublicTimelineEvent } = require('../utils/timeline');
 const { isCauseQuestion } = require('../utils/validation');
 const { AppError } = require('../utils/errors');
-const { createAiService, MAX_TEAMMATE_RESPONSE_WORDS, receiptSchema } = require('../utils/gemini');
-const { EVALUATOR_CONTRACT_VERSION, fingerprintEvaluationInput, publicReceipt, validateEvaluation } = require('../routes/receipt');
+const { createAiService, evaluatorEventIdInstruction, MAX_TEAMMATE_RESPONSE_WORDS, receiptSchema, safeParseJson } = require('../utils/gemini');
+const { EVALUATOR_CONTRACT_VERSION, fingerprintEvaluationInput, inspectEvaluation, publicReceipt, validateEvaluation } = require('../routes/receipt');
 
 function eventId(input, ...types) {
   const event = input.events.find((item) => types.includes(item.type));
@@ -60,6 +60,18 @@ function createHarness() {
     getTeammateCalls: () => teammateCalls
   };
 }
+
+test('mission preview returns the existing public mission without creating a session', async (t) => {
+  const { app, db } = createHarness();
+  t.after(() => db.close());
+
+  const response = await request(app).get('/api/session/mission').expect(200);
+
+  assert.equal(response.body.mission.id, 'nova-commerce-checkout');
+  assert.equal(response.body.mission.company, 'NovaCommerce');
+  assert.equal(response.body.mission.codebase_files.includes('backend/routes/checkout.js'), true);
+  assert.equal(db.raw.prepare('SELECT COUNT(*) AS total FROM sessions').get().total, 0);
+});
 
 function createScenarioHarness(scenario) {
   const db = createDatabase(':memory:');
@@ -290,6 +302,45 @@ test('evaluation validation uses canonical attribution from actual persisted eve
   assert.equal(validateEvaluation({ ...evaluation, evidence: evaluation.evidence.map((item) => item.dimension === 'technical_execution' ? { ...item, event_ids: ['invented-event'] } : item) }, evaluatorInput.events), null);
 });
 
+test('evaluator JSON parsing accepts structured and markdown-wrapped JSON but rejects malformed output', () => {
+  const valid = '{"scores":{},"evidence":[],"narrative_summary":"summary"}';
+
+  assert.deepEqual(safeParseJson(valid), { scores: {}, evidence: [], narrative_summary: 'summary' });
+  assert.deepEqual(safeParseJson(`Evaluator output:\n\n\`\`\`json\n${valid}\n\`\`\``), { scores: {}, evidence: [], narrative_summary: 'summary' });
+  assert.equal(safeParseJson('{"scores":'), null);
+});
+
+test('evaluator validation identifies missing fields, invalid scores, and missing independent-explanation anchors', async () => {
+  const { evaluatorInput } = await runEvaluationScenario(canonicalScenario());
+  const valid = completeEvaluation(evaluatorInput);
+
+  assert.equal(inspectEvaluation({ scores: valid.scores, evidence: valid.evidence }, evaluatorInput.events).failure, 'missing_evidence_or_summary');
+  assert.equal(inspectEvaluation({ ...valid, scores: { ...valid.scores, technical_execution: '82' } }, evaluatorInput.events).failure, 'invalid_scores');
+  assert.equal(inspectEvaluation({ ...valid, scores: { ...valid.scores, technical_execution: 101 } }, evaluatorInput.events).failure, 'invalid_scores');
+  const withoutFollowUpAnchor = {
+    ...valid,
+    evidence: valid.evidence.map((item) => item.dimension === 'independent_judgment'
+      ? { ...item, event_ids: [eventId(evaluatorInput, 'suggestion_rejected'), eventId(evaluatorInput, 'suggestion_verified')] }
+      : item)
+  };
+  assert.equal(inspectEvaluation(withoutFollowUpAnchor, evaluatorInput.events).failure, 'missing_required_anchor:independent_judgment');
+  const aiEventInsteadOfDecision = {
+    ...valid,
+    evidence: valid.evidence.map((item) => item.dimension === 'independent_judgment'
+      ? { ...item, event_ids: [eventId(evaluatorInput, 'suggestion_offered'), eventId(evaluatorInput, 'follow_up_answer')] }
+      : item)
+  };
+  assert.equal(inspectEvaluation(aiEventInsteadOfDecision, evaluatorInput.events).failure, 'missing_required_anchor:independent_judgment');
+});
+
+test('evaluator instructions require the exact independent-explanation event ID for independent judgment', async () => {
+  const { evaluatorInput } = await runEvaluationScenario(canonicalScenario());
+  const instruction = evaluatorEventIdInstruction(evaluatorInput);
+
+  assert.match(instruction, /independent_judgment: BOTH one decision ID/);
+  assert.match(instruction, new RegExp(eventId(evaluatorInput, 'follow_up_answer')));
+});
+
 test('learner-selected AI-source evidence remains a valid problem-framing anchor', async () => {
   const { evaluatorInput } = await runEvaluationScenario(canonicalScenario({ evidenceCreatedBy: 'ai_teammate' }));
   const evidenceEvent = evaluatorInput.events.find((event) => event.type === 'evidence_collected');
@@ -434,6 +485,9 @@ test('complete flow returns an ordered sanitized receipt and evaluator timeline'
   assert.equal(JSON.stringify(receipt.body).includes('system_prompt'), false);
   assert.equal(JSON.stringify(receipt.body).includes('evaluation_metadata'), false);
   assert.deepEqual(receipt.body.evidence[0].event_sequences.length, receipt.body.evidence[0].event_ids.length);
+  const independentJudgmentEvidence = receipt.body.evidence.find((item) => item.dimension === 'independent_judgment');
+  const followUpEvent = timeline.find((event) => event.type === 'follow_up_answer');
+  assert.ok(independentJudgmentEvidence.event_ids.includes(followUpEvent.event_id));
 
   const evaluatorTypes = getEvaluatorInput().events.map((event) => event.type);
   for (const type of ['user_prompt', 'ai_response', 'suggestion_offered', 'suggestion_verified', 'evidence_collected', 'submission', 'follow_up_answer']) {
@@ -521,13 +575,42 @@ test('AI failures preserve learner evidence and return a controlled error', asyn
   assert.deepEqual(db.getEvents(started.body.session_id).map((event) => event.type), ['session_started', 'user_prompt']);
 });
 
+test('invalid evaluator output preserves the completed learner record and creates no receipt', async (t) => {
+  const db = createDatabase(':memory:');
+  t.after(() => db.close());
+  const app = createApp({
+    db,
+    ai: {
+      teammate: async () => 'Inspect the available request failures before deciding.',
+      evaluate: async () => ({ scores: {}, evidence: [], narrative_summary: 'Malformed evaluator result.' })
+    }
+  });
+  const sessionId = randomUUID();
+  db.createSession(sessionId, 'nova-commerce-checkout');
+  db.appendEvent(sessionId, 'user_prompt', { message: 'Investigate the checkout failure.' });
+  db.saveSubmission(sessionId, 'Align the client payload with the route contract.', 'The request validation evidence points to a missing field.');
+  db.saveFollowUp(sessionId, 'Why did you choose this solution?', 'I rejected the timeout hypothesis because the route contract is the supplied evidence.');
+  db.appendEvent(sessionId, 'submission', { solution: 'Align the client payload with the route contract.' });
+  db.appendEvent(sessionId, 'follow_up_answer', { answer: 'I rejected the timeout hypothesis because the route contract is the supplied evidence.' });
+  db.updateSession(sessionId, { status: 'submitted', submission_completed: 1, follow_up_completed: 1 });
+
+  await request(app).post('/api/receipt/generate').send({ session_id: sessionId }).expect(503);
+
+  assert.equal(db.getReceipt(sessionId), undefined);
+  assert.equal(db.getSession(sessionId).status, 'submitted');
+  assert.equal(db.getSubmission(sessionId).solution, 'Align the client payload with the route contract.');
+  assert.equal(db.getFollowUp(sessionId).answer, 'I rejected the timeout hypothesis because the route contract is the supplied evidence.');
+  assert.equal(db.getEvents(sessionId).some((event) => event.type === 'evaluation_completed'), false);
+});
+
 test('Gemini provider uses system instructions and structured evaluator output', async () => {
   const requests = [];
+  const evaluatorSummary = Array.from({ length: MAX_TEAMMATE_RESPONSE_WORDS + 25 }, (_, index) => `evaluation${index + 1}`).join(' ');
   const client = {
     models: {
       generateContent: async (request) => {
         requests.push(request);
-        return { text: requests.length === 1 ? 'Inspect the evidence first.' : '{"scores":{},"evidence":[],"narrative_summary":"summary"}' };
+        return { text: requests.length === 1 ? 'Inspect the evidence first.' : JSON.stringify({ scores: {}, evidence: [], narrative_summary: evaluatorSummary }) };
       }
     }
   };
@@ -544,7 +627,8 @@ test('Gemini provider uses system instructions and structured evaluator output',
   const evaluator = await ai.evaluate({ mission: {}, events: [] });
 
   assert.equal(teammate, 'Inspect the evidence first.');
-  assert.deepEqual(evaluator, { scores: {}, evidence: [], narrative_summary: 'summary' });
+  assert.deepEqual(evaluator, { scores: {}, evidence: [], narrative_summary: evaluatorSummary });
+  assert.equal(evaluator.narrative_summary.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS + 25);
   assert.equal(requests[0].model, 'gemini-test-model');
   assert.equal(typeof requests[0].config.systemInstruction, 'string');
   assert.equal(requests[0].config.systemInstruction.includes('Do not invent files, logs, analytics, Git history'), true);
@@ -559,6 +643,7 @@ test('Gemini provider uses system instructions and structured evaluator output',
   assert.equal(requests[1].config.systemInstruction.includes('evidence_attribution.actor'), true);
   assert.equal(requests[1].config.systemInstruction.includes('AI-provided context'), true);
   assert.equal(requests[1].config.systemInstruction.includes('evidence-rubric-v1'), true);
+  assert.equal(requests[1].config.systemInstruction.includes('independent_judgment: BOTH one decision ID'), true);
   assert.deepEqual(ai.getEvaluationMetadata(), { model: 'gemini-test-model', temperature: 0 });
 });
 

@@ -207,7 +207,7 @@ function SectionLabel({ children }) {
   );
 }
 
-export default function WorkTraceLanding() {
+export default function WorkTraceLanding({ onStart }) {
   const heroRef = useRef(null);
   const { scrollYProgress } = useScroll({
     target: heroRef,
@@ -261,7 +261,7 @@ export default function WorkTraceLanding() {
               Receipt
             </a>
           </nav>
-          <button className="text-sm font-medium px-4 py-2 rounded-md bg-[#EDEDEE] text-black hover:bg-[#D7FF3F] transition-colors">
+          <button type="button" onClick={onStart} className="text-sm font-medium px-4 py-2 rounded-md bg-[#EDEDEE] text-black hover:bg-[#D7FF3F] transition-colors">
             Request Access
           </button>
         </div>
@@ -318,7 +318,7 @@ export default function WorkTraceLanding() {
             variants={fadeUp}
             className="mt-10 flex flex-wrap items-center gap-4"
           >
-            <button className="group flex items-center gap-2 px-6 py-3 rounded-md bg-[#D7FF3F] text-black font-medium hover:bg-white transition-colors">
+            <button type="button" onClick={onStart} className="group flex items-center gap-2 px-6 py-3 rounded-md bg-[#D7FF3F] text-black font-medium hover:bg-white transition-colors">
               See an Investigation
               <ArrowRight
                 size={16}

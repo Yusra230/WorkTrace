@@ -4,56 +4,35 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Provider } from 'react-redux';
 import App from './App';
-import worktraceReducer from './features/worktrace/worktraceSlice';
+import worktraceReducer, { applicationViews, initialState } from './features/worktrace/worktraceSlice';
 import { clearActiveSession, saveActiveSession } from './services/activeSessionStorage';
 import { saveCompletedSessionId } from './services/receiptStorage';
-import { getReceipt } from './services/worktraceApi';
+import { getMissionPreview, getReceipt, startSession } from './services/worktraceApi';
 
-vi.mock('./components/AppShell', () => ({
-  default: ({ children }) => (
-    <div data-testid="app-shell">
-      <p>WorkTrace</p>
-      <p>Competency evidence for AI-native work</p>
-      <p>Server-side AI</p>
-      {children}
-    </div>
-  )
-}));
 vi.mock('./components/Home', () => ({
-  default: () => <section aria-label="Public landing"><button type="button">See an Investigation</button></section>
+  default: ({ onStart }) => <section aria-label="Public landing"><button type="button" onClick={onStart}>See an Investigation</button><button type="button" onClick={onStart}>Request Access</button></section>
 }));
-vi.mock('./components/OnboardingScreen', () => ({ default: () => <p>Internal onboarding</p> }));
+vi.mock('./components/MissionEntry', () => ({ default: ({ mission, onStart }) => <section aria-label="Mission entry"><p>{mission?.title || 'Loading mission'}</p><button type="button" onClick={onStart}>Start Investigation</button></section> }));
 vi.mock('./components/InvestigationWorkSpace', () => ({ default: () => <p>Internal workspace</p> }));
-vi.mock('./components/EvaluationScreen', () => ({ default: () => <p>Evaluation</p> }));
-vi.mock('./components/ReceiptScreen', () => ({ default: () => <p>Restored receipt</p> }));
+vi.mock('./components/EvaluationTransition', () => ({ default: ({ onViewReceipt, status }) => <section aria-label="Evaluation transition"><p>{status}</p><button type="button" onClick={onViewReceipt}>View Competency Receipt</button></section> }));
+vi.mock('./components/CompetencyReceipt', () => ({ default: () => <p>Restored receipt</p> }));
 vi.mock('./services/worktraceApi', () => ({
   generateReceipt: vi.fn(),
+  getMissionPreview: vi.fn(() => Promise.resolve({ title: 'Checkout Conversion Drop' })),
   getReceipt: vi.fn(() => Promise.resolve({ session_id: 'receipt-1' })),
   logEvent: vi.fn(),
   sendChat: vi.fn(),
-  startSession: vi.fn(() => new Promise(() => {})),
+  startSession: vi.fn(() => Promise.resolve({ session_id: 'new-session', mission: { title: 'Checkout Conversion Drop' } })),
   submitFollowUp: vi.fn(),
   submitSolution: vi.fn()
 }));
 
 const activeSession = {
-  sessionId: 'active-session-1',
-  mission: { title: 'Investigate the issue' },
-  currentView: 'workspace',
-  selectedFilePath: 'src/api.js',
-  chatTranscript: [],
-  evidenceItems: [],
-  offeredSuggestion: null,
-  suggestionId: null,
-  suggestionDecision: null,
-  verification: { status: 'idle' },
-  submission: {},
-  followUp: {},
-  evaluation: { status: 'idle' }
+  sessionId: 'active-session-1', mission: { title: 'Investigate the issue' }, currentView: 'workspace', selectedFilePath: 'src/api.js', chatTranscript: [], evidenceItems: [], offeredSuggestion: null, suggestionId: null, suggestionDecision: null, verification: { status: 'idle' }, submission: {}, followUp: {}, evaluation: { status: 'idle' }
 };
 
-function renderApp() {
-  const store = configureStore({ reducer: { worktrace: worktraceReducer } });
+function renderApp(preloadedState) {
+  const store = configureStore({ reducer: { worktrace: worktraceReducer }, preloadedState: preloadedState ? { worktrace: preloadedState } : undefined });
   return render(<Provider store={store}><App /></Provider>);
 }
 
@@ -72,58 +51,49 @@ afterEach(() => {
 
 describe('public and internal entry routing', () => {
   it('renders the public landing at #/ when there is no restoration', async () => {
-    setHash('#/');
     renderApp();
-
     expect(await screen.findByLabelText('Public landing')).toBeTruthy();
   });
 
-  it('moves from the landing CTA into #/investigate', async () => {
-    setHash('#/');
+  it.each(['See an Investigation', 'Request Access'])('opens MissionEntry from %s without creating a session', async (label) => {
     renderApp();
+    fireEvent.click(await screen.findByRole('button', { name: label }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'See an Investigation' }));
     expect(window.location.hash).toBe('#/investigate');
-    expect(await screen.findByText('Internal onboarding')).toBeTruthy();
+    expect(await screen.findByLabelText('Mission entry')).toBeTruthy();
+    await waitFor(() => expect(getMissionPreview).toHaveBeenCalledTimes(1));
+    expect(startSession).not.toHaveBeenCalled();
+  });
+
+  it('starts one session from MissionEntry and reaches the workspace', async () => {
+    setHash('#/investigate');
+    renderApp();
+    await screen.findByLabelText('Mission entry');
+    fireEvent.click(screen.getByRole('button', { name: 'Start Investigation' }));
+
+    await waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('Internal workspace')).toBeTruthy();
   });
 
   it('returns to the landing when Back changes #/investigate to #/', async () => {
-    setHash('#/');
+    setHash('#/investigate');
     renderApp();
-    fireEvent.click(await screen.findByRole('button', { name: 'See an Investigation' }));
-    expect(await screen.findByText('Internal onboarding')).toBeTruthy();
-
+    await screen.findByLabelText('Mission entry');
     setHash('#/');
     expect(await screen.findByLabelText('Public landing')).toBeTruthy();
   });
 
-  it('restores an active session on a refreshed #/investigate route', async () => {
+  it('restores an active session directly into the workspace', async () => {
     saveActiveSession(activeSession);
     setHash('#/investigate');
     renderApp();
 
     expect(await screen.findByText('Internal workspace')).toBeTruthy();
     expect(document.querySelector('.worktrace-internal-app')).toBeTruthy();
-    expect(screen.queryByTestId('app-shell')).toBeNull();
-    expect(screen.queryByText('WorkTrace')).toBeNull();
-    expect(screen.queryByText('Competency evidence for AI-native work')).toBeNull();
-    expect(screen.queryByText('Server-side AI')).toBeNull();
-    expect(window.location.hash).toBe('#/investigate');
+    expect(screen.queryByLabelText('Mission entry')).toBeNull();
   });
 
-  it('uses a restored session for initial entry only, then allows a later root navigation', async () => {
-    saveActiveSession(activeSession);
-    setHash('#/');
-    renderApp();
-
-    expect(await screen.findByText('Internal workspace')).toBeTruthy();
-    await waitFor(() => expect(window.location.hash).toBe('#/investigate'));
-
-    setHash('#/');
-    expect(await screen.findByLabelText('Public landing')).toBeTruthy();
-  });
-
-  it('keeps completed receipt restoration ahead of the public landing', async () => {
+  it('keeps completed receipt restoration ahead of MissionEntry', async () => {
     saveCompletedSessionId('receipt-1');
     setHash('#/');
     renderApp();
@@ -131,5 +101,23 @@ describe('public and internal entry routing', () => {
     await waitFor(() => expect(getReceipt).toHaveBeenCalledWith({ sessionId: 'receipt-1' }));
     expect(await screen.findByText('Restored receipt')).toBeTruthy();
     expect(window.location.hash).toBe('#/investigate');
+  });
+
+  it('moves from a completed evaluation transition into the receipt only after View Competency Receipt', async () => {
+    const state = {
+      ...initialState,
+      sessionId: 'finished-session',
+      mission: { title: 'Checkout Conversion Drop' },
+      currentView: applicationViews.EVALUATING,
+      competencyReceipt: { session_id: 'finished-session', scores: {}, evidence: [], event_timeline: [] },
+      evaluation: { status: 'completed', attempts: 1 },
+      receiptRestoration: { status: 'not-found' }
+    };
+    setHash('#/investigate');
+    renderApp(state);
+
+    await screen.findByLabelText('Evaluation transition');
+    fireEvent.click(screen.getByRole('button', { name: 'View Competency Receipt' }));
+    expect(await screen.findByText('Restored receipt')).toBeTruthy();
   });
 });
