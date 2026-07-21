@@ -31,6 +31,17 @@ function createGroundedMissionContext(mission, codebase) {
   };
 }
 
+function normalizeTeammateReply(reply) {
+  if (typeof reply === 'string') return { message: reply, suggestion: null };
+  if (!reply || typeof reply.message !== 'string') {
+    throw new AppError(503, 'AI service temporarily unavailable.', 'ai_empty_response');
+  }
+  return {
+    message: reply.message,
+    suggestion: typeof reply.suggestion === 'string' && reply.suggestion.trim() ? reply.suggestion.trim() : null
+  };
+}
+
 function createChatRouter({ db, mission, codebase, ai, sessionLock }) {
   const router = express.Router();
 
@@ -42,35 +53,36 @@ function createChatRouter({ db, mission, codebase, ai, sessionLock }) {
       db.updateSession(sessionId, { message_count: nextMessageCount });
       db.appendEvent(sessionId, 'user_prompt', { message });
 
-      const shouldOfferSuggestion = !session.flawed_suggestion_offered && (
+      const shouldOfferSeededSuggestion = !session.flawed_suggestion_offered && (
         nextMessageCount === 5 || isCauseQuestion(message)
       );
-      const trigger = nextMessageCount === 5 ? 'fifth_message' : 'cause_question';
       const history = buildTeammateHistory(getPublicTimeline(db, sessionId));
       const groundedMissionContext = createGroundedMissionContext(mission, codebase);
-      const teammateReply = await ai.teammate(history, message, groundedMissionContext);
+      const teammateReply = normalizeTeammateReply(await ai.teammate(history, message, groundedMissionContext));
 
-      let aiResponse = teammateReply;
+      const shouldOfferStructuredSuggestion = !session.flawed_suggestion_offered && Boolean(teammateReply.suggestion);
+      const suggestion = shouldOfferStructuredSuggestion ? teammateReply.suggestion : (shouldOfferSeededSuggestion ? mission.flawed_suggestion : null);
+      const trigger = shouldOfferStructuredSuggestion ? 'teammate_structured' : (nextMessageCount === 5 ? 'fifth_message' : 'cause_question');
       let suggestionId = null;
-      if (shouldOfferSuggestion) {
+      if (suggestion) {
         suggestionId = createUuid();
-        aiResponse = `${teammateReply}\n\nOne hypothesis to consider: ${mission.flawed_suggestion}`;
       }
-      db.appendEvent(sessionId, 'ai_response', { message: aiResponse });
+      db.appendEvent(sessionId, 'ai_response', { message: teammateReply.message });
 
       if (suggestionId) {
         db.updateSession(sessionId, { flawed_suggestion_offered: 1 });
         db.appendEvent(sessionId, 'suggestion_offered', {
           suggestion_id: suggestionId,
-          suggestion: mission.flawed_suggestion,
+          suggestion,
           trigger
         });
       }
 
       return {
-        ai_response: aiResponse,
+        ai_response: teammateReply.message,
         suggestion_offered: Boolean(suggestionId),
         suggestion_id: suggestionId,
+        suggestion,
         verification_required: Boolean(suggestionId)
       };
     });
@@ -80,4 +92,4 @@ function createChatRouter({ db, mission, codebase, ai, sessionLock }) {
   return router;
 }
 
-module.exports = { createChatRouter, createGroundedMissionContext, requireActiveSession };
+module.exports = { createChatRouter, createGroundedMissionContext, normalizeTeammateReply, requireActiveSession };

@@ -7,7 +7,7 @@ const { createApp } = require('../server');
 const { toEvaluationTimelineEvent, toPublicTimelineEvent } = require('../utils/timeline');
 const { isCauseQuestion } = require('../utils/validation');
 const { AppError } = require('../utils/errors');
-const { createAiService, evaluatorEventIdInstruction, MAX_TEAMMATE_RESPONSE_WORDS, receiptSchema, safeParseJson } = require('../utils/gemini');
+const { createAiService, evaluatorEventIdInstruction, MAX_TEAMMATE_RESPONSE_WORDS, receiptSchema, safeParseJson, teammateSchema } = require('../utils/gemini');
 const { EVALUATOR_CONTRACT_VERSION, fingerprintEvaluationInput, inspectEvaluation, publicReceipt, validateEvaluation } = require('../routes/receipt');
 
 function eventId(input, ...types) {
@@ -424,6 +424,43 @@ test('chat supplies Gemini with the complete grounded mission workspace, not onl
   assert.equal(Object.hasOwn(context.mission, 'flawed_suggestion'), false);
 });
 
+test('a structured teammate proposal creates the existing AI suggestion event', async (t) => {
+  const db = createDatabase(':memory:');
+  const proposedAction = 'Add temporary error logging around the payment confirmation request before changing the payload.';
+  const app = createApp({
+    db,
+    ai: {
+      teammate: async () => ({
+        message: 'The confirmation path is the most useful place to investigate next.',
+        suggestion: proposedAction
+      }),
+      evaluate: async () => ({ scores: {}, evidence: [], narrative_summary: 'unused' })
+    }
+  });
+  t.after(() => db.close());
+
+  const started = await request(app).post('/api/session/start').send({}).expect(201);
+  const chat = await request(app).post('/api/chat').send({
+    session_id: started.body.session_id,
+    message: 'Which checkout path should I inspect first?'
+  }).expect(200);
+
+  assert.equal(chat.body.ai_response, 'The confirmation path is the most useful place to investigate next.');
+  assert.equal(chat.body.suggestion_offered, true);
+  assert.match(chat.body.suggestion_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.equal(chat.body.suggestion, proposedAction);
+
+  const events = db.getEvents(started.body.session_id);
+  const aiResponse = events.find((event) => event.type === 'ai_response');
+  const offeredSuggestion = events.find((event) => event.type === 'suggestion_offered');
+  assert.deepEqual(JSON.parse(aiResponse.data), { message: chat.body.ai_response });
+  assert.deepEqual(JSON.parse(offeredSuggestion.data), {
+    suggestion_id: chat.body.suggestion_id,
+    suggestion: proposedAction,
+    trigger: 'teammate_structured'
+  });
+});
+
 test('complete flow returns an ordered sanitized receipt and evaluator timeline', async (t) => {
   const { db, app, getEvaluationCalls, getEvaluatorInput } = createHarness();
   t.after(() => db.close());
@@ -610,7 +647,7 @@ test('Gemini provider uses system instructions and structured evaluator output',
     models: {
       generateContent: async (request) => {
         requests.push(request);
-        return { text: requests.length === 1 ? 'Inspect the evidence first.' : JSON.stringify({ scores: {}, evidence: [], narrative_summary: evaluatorSummary }) };
+        return { text: requests.length === 1 ? JSON.stringify({ message: 'Inspect the evidence first.', suggestion: '' }) : JSON.stringify({ scores: {}, evidence: [], narrative_summary: evaluatorSummary }) };
       }
     }
   };
@@ -626,7 +663,7 @@ test('Gemini provider uses system instructions and structured evaluator output',
   const teammate = await ai.teammate([{ role: 'learner', content: 'What changed?' }], 'Where should I look?', groundedMissionContext);
   const evaluator = await ai.evaluate({ mission: {}, events: [] });
 
-  assert.equal(teammate, 'Inspect the evidence first.');
+  assert.deepEqual(teammate, { message: 'Inspect the evidence first.', suggestion: null });
   assert.deepEqual(evaluator, { scores: {}, evidence: [], narrative_summary: evaluatorSummary });
   assert.equal(evaluator.narrative_summary.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS + 25);
   assert.equal(requests[0].model, 'gemini-test-model');
@@ -637,6 +674,8 @@ test('Gemini provider uses system instructions and structured evaluator output',
   assert.equal(requests[0].contents.includes("fetch('/api/payment/confirm')"), true);
   assert.equal(requests[0].contents.includes('frontend/Cart.js'), true);
   assert.equal(requests[0].contents.includes('backend/routes/checkout.js'), true);
+  assert.equal(requests[0].config.responseMimeType, 'application/json');
+  assert.deepEqual(requests[0].config.responseJsonSchema, teammateSchema);
   assert.equal(requests[1].config.responseMimeType, 'application/json');
   assert.deepEqual(requests[1].config.responseJsonSchema, receiptSchema);
   assert.equal(requests[1].config.temperature, 0);
@@ -651,7 +690,7 @@ test('Gemini teammate responses are capped for ordinary investigation prompts bu
   const longResponse = Array.from({ length: MAX_TEAMMATE_RESPONSE_WORDS + 25 }, (_, index) => `word${index + 1}`).join(' ');
   const client = {
     models: {
-      generateContent: async () => ({ text: longResponse })
+      generateContent: async () => ({ text: JSON.stringify({ message: longResponse, suggestion: '' }) })
     }
   };
   const ai = createAiService({ client, model: 'gemini-test-model' });
@@ -659,7 +698,8 @@ test('Gemini teammate responses are capped for ordinary investigation prompts bu
   const concise = await ai.teammate([], 'What should I inspect next?');
   const detailed = await ai.teammate([], 'Please provide a detailed explanation of the available checkout code.');
 
-  assert.equal(concise.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS);
-  assert.equal(concise.endsWith('…'), true);
-  assert.equal(detailed.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS + 25);
+  assert.equal(concise.message.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS);
+  assert.equal(concise.message.endsWith('…'), true);
+  assert.equal(concise.suggestion, null);
+  assert.equal(detailed.message.match(/\S+/g).length, MAX_TEAMMATE_RESPONSE_WORDS + 25);
 });

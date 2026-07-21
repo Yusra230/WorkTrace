@@ -437,8 +437,8 @@ const worktraceSlice = createSlice({
           state.chatTranscript.push({ id: `learner-${action.meta.requestId}`, role: 'learner', content: message, status: 'sent' });
         }
         state.chatTranscript.push({ id: `teammate-${action.meta.requestId}`, role: 'teammate', content: response.ai_response, status: 'sent' });
-        if (response.suggestion_offered && response.suggestion_id) {
-          state.offeredSuggestion = { message: response.ai_response };
+        if (response.suggestion_offered && response.suggestion_id && response.suggestion) {
+          state.offeredSuggestion = { message: response.suggestion };
           state.suggestionId = response.suggestion_id;
         }
       })

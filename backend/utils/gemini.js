@@ -8,6 +8,16 @@ const { redactSensitiveText } = require('./safety');
 const EVALUATOR_TEMPERATURE = 0;
 const MAX_TEAMMATE_RESPONSE_WORDS = 200;
 
+const teammateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['message', 'suggestion'],
+  properties: {
+    message: { type: 'string' },
+    suggestion: { type: 'string' }
+  }
+};
+
 function requestsDetail(message) {
   return /\b(detail(?:ed)?|in[-\s]?depth|thorough(?:ly)?|comprehensive(?:ly)?|step[-\s]?by[-\s]?step)\b/i.test(message || '');
 }
@@ -17,6 +27,17 @@ function constrainTeammateResponse(text, message) {
   const words = text.match(/\S+/g) || [];
   if (words.length <= MAX_TEAMMATE_RESPONSE_WORDS) return text;
   return `${words.slice(0, MAX_TEAMMATE_RESPONSE_WORDS).join(' ')}…`;
+}
+
+function parseTeammateResponse(text, message) {
+  const parsed = safeParseJson(text);
+  if (!parsed || typeof parsed.message !== 'string' || typeof parsed.suggestion !== 'string') return null;
+  const response = constrainTeammateResponse(parsed.message.trim(), message);
+  if (!response) return null;
+  return {
+    message: response,
+    suggestion: parsed.suggestion.trim() || null
+  };
 }
 
 const receiptSchema = {
@@ -134,11 +155,18 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
       const response = await generateContent({
         model,
         contents: `Grounded mission context (the complete available workspace and mission signals):\n${JSON.stringify(groundedMissionContext)}\n\nVisible conversation so far:\n${transcript || '(none)'}\n\nCurrent learner message:\n${message}`,
-        config: { systemInstruction: teammatePrompt }
+        config: {
+          systemInstruction: teammatePrompt,
+          responseMimeType: 'application/json',
+          responseJsonSchema: teammateSchema
+        }
       });
-      const text = typeof response.text === 'string' ? constrainTeammateResponse(response.text.trim(), message) : '';
-      if (!text) throw new AppError(503, 'AI service temporarily unavailable.', 'ai_empty_response');
-      return redactSensitiveText(text);
+      const teammateResponse = typeof response.text === 'string' ? parseTeammateResponse(response.text, message) : null;
+      if (!teammateResponse) throw new AppError(503, 'AI service temporarily unavailable.', 'ai_empty_response');
+      return {
+        message: redactSensitiveText(teammateResponse.message),
+        suggestion: teammateResponse.suggestion ? redactSensitiveText(teammateResponse.suggestion) : null
+      };
     },
     async evaluate(evidence, correction = false) {
       const correctionInstruction = correction
@@ -159,4 +187,4 @@ function createAiService({ client, model = process.env.GEMINI_MODEL || 'gemini-2
   };
 }
 
-module.exports = { createAiService, evaluatorEventIdInstruction, receiptSchema, safeParseJson, EVALUATOR_TEMPERATURE, MAX_TEAMMATE_RESPONSE_WORDS, constrainTeammateResponse };
+module.exports = { createAiService, evaluatorEventIdInstruction, parseTeammateResponse, receiptSchema, safeParseJson, teammateSchema, EVALUATOR_TEMPERATURE, MAX_TEAMMATE_RESPONSE_WORDS, constrainTeammateResponse };

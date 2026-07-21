@@ -61,7 +61,8 @@ describe('worktraceSlice', () => {
       response: {
         ai_response: 'Start by inspecting the July 14 payment failure signals.',
         suggestion_offered: true,
-        suggestion_id: 'suggestion-123'
+        suggestion_id: 'suggestion-123',
+        suggestion: 'Add temporary error logging around the payment confirmation request before changing the payload.'
       }
     };
     const pendingState = reducer(activeState, sendChat.pending('request-2', message));
@@ -72,7 +73,7 @@ describe('worktraceSlice', () => {
       { id: 'teammate-request-2', role: 'teammate', content: payload.response.ai_response, status: 'sent' }
     ]);
     expect(nextState.suggestionId).toBe('suggestion-123');
-    expect(nextState.offeredSuggestion).toEqual({ message: payload.response.ai_response });
+    expect(nextState.offeredSuggestion).toEqual({ message: payload.response.suggestion });
   });
 
   it('persists a recorded decision and completes verification without changing it', () => {

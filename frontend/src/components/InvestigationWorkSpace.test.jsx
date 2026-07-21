@@ -95,6 +95,32 @@ describe('InvestigationWorkspace', () => {
     await waitFor(() => expect(logEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'suggestion_verified', sessionId: 'session-1' })));
   });
 
+  it('renders a structured teammate proposal in the existing decision card and accepts it through the current event flow', async () => {
+    const suggestionId = '9f8c3e6a-a938-4b6d-9a43-02521055ca9b';
+    const suggestion = 'Add temporary error logging around the payment confirmation request before changing the payload.';
+    sendChat.mockResolvedValueOnce({
+      ai_response: 'The confirmation path is the most useful place to investigate next.',
+      suggestion_offered: true,
+      suggestion_id: suggestionId,
+      suggestion
+    });
+    const { store } = renderWorkspace({ offeredSuggestion: null, suggestionId: null, suggestionDecision: null });
+
+    fireEvent.change(screen.getByPlaceholderText(/Add an investigation note/i), { target: { value: 'Which checkout path should I inspect first?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send investigation note' }));
+
+    expect(await screen.findByText(suggestion)).toBeTruthy();
+    expect(screen.getByText(/AI Proposes/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+
+    await waitFor(() => expect(logEvent).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      type: 'suggestion_accepted',
+      data: { suggestion_id: suggestionId }
+    }));
+    expect(store.getState().worktrace.suggestionDecision).toBe('accepted');
+  });
+
   it('only auto-scrolls a new chat response and preserves a learner-controlled conversation position', async () => {
     Object.defineProperty(window, 'IntersectionObserver', { configurable: true, value: Observer });
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
