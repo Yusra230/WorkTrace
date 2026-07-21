@@ -19,7 +19,7 @@ WorkTrace evaluates the investigation process rather than only the final answer.
 
 AI tools can generate answers. WorkTrace looks for the human work around them: careful investigation, critical evaluation of AI input, independent decisions, evidence collection, and reasoning.
 
-**WorkTrace evaluates the process—not just the result.**
+**WorkTrace evaluates the process, not just the result.**
 
 ## The Problem
 
