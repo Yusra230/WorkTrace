@@ -71,4 +71,12 @@ describe('CompetencyReceipt', () => {
     expect(items).toEqual(['#2', '#3', '#4', '#5', '#6', '#7', '#8']);
     expect(screen.getByText('Ordered, backend-sanitized events from this investigation.')).toBeTruthy();
   });
+
+  it('keeps share and export visible as disabled future actions', () => {
+    render(<CompetencyReceipt mission={mission} receipt={receipt} />);
+
+    expect(screen.getByRole('button', { name: /Share competency receipt.*coming soon/i }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: /Export competency receipt.*coming soon/i }).disabled).toBe(true);
+    expect(screen.getAllByText('Future')).toHaveLength(2);
+  });
 });
