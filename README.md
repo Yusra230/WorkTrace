@@ -317,7 +317,7 @@ I used Codex and GPT-5.6 throughout development to implement the full-stack prod
 
 ## Submission Checklist
 
-- **Demo Video URL:** `TODO: add final YouTube URL`
-- **Repository URL:** `TODO: add repository URL`
-- **Codex /feedback Session ID:** `TODO: add session ID`
+- **Demo Video URL:** `https://www.youtube.com/watch?v=nfjeNNilBqA`
+- **Repository URL:** `https://github.com/Yusra230/WorkTrace`
+- **Codex /feedback Session ID:** `019f7648-45db-7f62-b48c-db7777143993`
 
